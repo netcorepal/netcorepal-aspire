@@ -47,7 +47,7 @@ public static class OpenGaussBuilderExtensions
                       .WithImage(OpenGaussContainerImageTags.Image, OpenGaussContainerImageTags.Tag)
                       .WithImageRegistry(OpenGaussContainerImageTags.Registry)
                       .WithEnvironment("GS_PASSWORD", openGaussServer.PasswordParameter)
-                      .WithEnvironment("PGPASSWORD", openGaussServer.PasswordParameter)
+                      .WithEnvironment("PGPASSWORD", openGaussServer.PasswordParameter) // OpenGauss is PostgreSQL-compatible and uses PGPASSWORD for client authentication
                       .PublishAsContainer();
     }
 

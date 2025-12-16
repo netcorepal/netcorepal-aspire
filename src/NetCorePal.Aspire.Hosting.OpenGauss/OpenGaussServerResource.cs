@@ -14,12 +14,15 @@ public class OpenGaussServerResource : ContainerResource, IResourceWithConnectio
     /// </summary>
     /// <param name="name">The name of the resource.</param>
     /// <param name="userName">A parameter that contains the OpenGauss server user name, or <see langword="null"/> to use a default value.</param>
-    /// <param name="password">A parameter that contains the OpenGauss server password.</param>
-    public OpenGaussServerResource(string name, ParameterResource? userName = null, ParameterResource? password = null) : base(name)
+    /// <param name="password">A parameter that contains the OpenGauss server password. Must not be null.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="password"/> is null.</exception>
+    public OpenGaussServerResource(string name, ParameterResource? userName, ParameterResource password) : base(name)
     {
+        ArgumentNullException.ThrowIfNull(password);
+
         PrimaryEndpoint = new EndpointReference(this, PrimaryEndpointName);
         UserNameParameter = userName;
-        PasswordParameter = password ?? throw new ArgumentNullException(nameof(password));
+        PasswordParameter = password;
     }
 
     /// <summary>
