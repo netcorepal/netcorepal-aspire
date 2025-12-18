@@ -13,8 +13,9 @@ jobs:
       fail-fast: false
       matrix:
         framework: [ 'net8.0', 'net9.0', 'net10.0' ]
+        package: [ 'Hosting.OpenGauss' ]
 
-    name: Test (${{ matrix.framework }})
+    name: Test (${{ matrix.package }} / ${{ matrix.framework }})
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
         run: dotnet restore
 
       - name: Build
-        run: dotnet build -c Release --no-restore
+        run: dotnet build -c Release -f ${{ matrix.framework }} ${{ format('tests/NetCorePal.Aspire.{0}.Tests/NetCorePal.Aspire.{0}.Tests.csproj', matrix.package) }} --no-restore
 
       - name: Test
-        run: dotnet test -c Release --no-build --verbosity normal --logger "console;verbosity=detailed"
+        run: dotnet test -c Release -f ${{ matrix.framework }} ${{ format('tests/NetCorePal.Aspire.{0}.Tests/NetCorePal.Aspire.{0}.Tests.csproj', matrix.package) }} --no-build --verbosity normal --logger "console;verbosity=detailed"
