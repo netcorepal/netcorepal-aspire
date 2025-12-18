@@ -35,6 +35,13 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
 
         // Assert
         Assert.Equal(System.Data.ConnectionState.Open, connection.State);
+        
+        // Also verify we can execute a simple query
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1;";
+        var result = await command.ExecuteScalarAsync();
+        Assert.NotNull(result);
+        Assert.Equal(1, Convert.ToInt32(result));
     }
 
     [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
@@ -51,7 +58,8 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         var result = await command.ExecuteScalarAsync();
 
         // Assert
-        Assert.Equal(1, result);
+        Assert.NotNull(result);
+        Assert.Equal(1, Convert.ToInt32(result));
     }
 
     [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
@@ -131,6 +139,53 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
         Assert.Equal(System.Data.ConnectionState.Open, connection.State);
+        
+        // Verify we can execute queries on the specific database
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT current_database();";
+        var result = await command.ExecuteScalarAsync();
+        Assert.NotNull(result);
+        Assert.Equal("testdb", result.ToString());
+    }
+    
+    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    public async Task CanExecuteMultipleQueriesOnSameConnection()
+    {
+        // Arrange
+        var connectionString = await _fixture.GetConnectionStringAsync();
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+
+        // Act & Assert - Execute multiple queries
+        for (int i = 1; i <= 5; i++)
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT {i};";
+            var result = await command.ExecuteScalarAsync();
+            Assert.NotNull(result);
+            Assert.Equal(i, Convert.ToInt32(result));
+        }
+    }
+    
+    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    public async Task ConnectionPoolingWorks()
+    {
+        // Arrange
+        var connectionString = await _fixture.GetConnectionStringAsync();
+
+        // Act - Open and close multiple connections
+        for (int i = 0; i < 3; i++)
+        {
+            await using var connection = new NpgsqlConnection(connectionString);
+            await connection.OpenAsync();
+            
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1;";
+            var result = await command.ExecuteScalarAsync();
+            
+            Assert.NotNull(result);
+            Assert.Equal(1, Convert.ToInt32(result));
+        }
     }
 }
 
@@ -184,7 +239,13 @@ public class OpenGaussFixture : IAsyncLifetime
         }
 
         var connectionString = await _openGaussServer.Resource.GetConnectionStringAsync();
-        return connectionString ?? throw new InvalidOperationException("Connection string is null.");
+        if (connectionString is null)
+        {
+            throw new InvalidOperationException("Connection string is null.");
+        }
+        
+        // Add connection pooling parameter to match testcontainers implementation
+        return connectionString + ";No Reset On Close=true;";
     }
 
     public async Task<string> GetDatabaseConnectionStringAsync()
@@ -202,7 +263,13 @@ public class OpenGaussFixture : IAsyncLifetime
         }
 
         var connectionString = await _openGaussDatabase.Resource.GetConnectionStringAsync();
-        return connectionString ?? throw new InvalidOperationException("Connection string is null.");
+        if (connectionString is null)
+        {
+            throw new InvalidOperationException("Connection string is null.");
+        }
+        
+        // Add connection pooling parameter to match testcontainers implementation
+        return connectionString + ";No Reset On Close=true;";
     }
 
     private static bool IsDockerEnabled()

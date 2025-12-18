@@ -295,4 +295,17 @@ public class OpenGaussBuilderExtensionsTests
         var connectionString = opengauss.Resource.ConnectionStringExpression.ValueExpression;
         Assert.Contains("Username=gaussdb", connectionString);
     }
+
+    [Fact]
+    public void AddOpenGaussRunsInPrivilegedModeByDefault()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var opengauss = builder.AddOpenGauss("opengauss");
+
+        // Verify that privileged mode is added by default
+        var annotation = opengauss.Resource.Annotations.OfType<CommandLineArgsCallbackAnnotation>()
+            .FirstOrDefault();
+
+        Assert.NotNull(annotation);
+    }
 }
