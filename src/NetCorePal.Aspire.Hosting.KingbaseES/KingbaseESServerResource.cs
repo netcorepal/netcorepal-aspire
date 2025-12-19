@@ -1,0 +1,80 @@
+using Aspire.Hosting.ApplicationModel;
+
+namespace Aspire.Hosting.ApplicationModel;
+
+/// <summary>
+/// A resource that represents a KingbaseES container.
+/// </summary>
+public class KingbaseESServerResource : ContainerResource, IResourceWithConnectionString
+{
+    internal const string PrimaryEndpointName = "tcp";
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="KingbaseESServerResource"/> class.
+    /// </summary>
+    /// <param name="name">The name of the resource.</param>
+    /// <param name="userName">A parameter that contains the KingbaseES server user name, or <see langword="null"/> to use a default value.</param>
+    /// <param name="password">A parameter that contains the KingbaseES server password. Must not be null.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="password"/> is null.</exception>
+    public KingbaseESServerResource(string name, ParameterResource? userName, ParameterResource password) : base(name)
+    {
+        ArgumentNullException.ThrowIfNull(password);
+
+        PrimaryEndpoint = new EndpointReference(this, PrimaryEndpointName);
+        UserNameParameter = userName;
+        PasswordParameter = password;
+    }
+
+    /// <summary>
+    /// Gets the primary endpoint for the KingbaseES server.
+    /// </summary>
+    public EndpointReference PrimaryEndpoint { get; }
+
+    /// <summary>
+    /// Gets or sets the parameter that contains the KingbaseES server user name.
+    /// </summary>
+    public ParameterResource? UserNameParameter { get; set; }
+
+    /// <summary>
+    /// Gets a reference to the user name for the KingbaseES server.
+    /// </summary>
+    /// <remarks>
+    /// Returns the user name parameter if specified, otherwise returns the default user name "system".
+    /// </remarks>
+    internal ReferenceExpression UserNameReference =>
+        UserNameParameter is not null ?
+            ReferenceExpression.Create($"{UserNameParameter}") :
+            ReferenceExpression.Create($"system");
+
+    /// <summary>
+    /// Gets or sets the parameter that contains the KingbaseES server password.
+    /// </summary>
+    public ParameterResource PasswordParameter { get; set; }
+
+    /// <summary>
+    /// Gets the connection string expression for the KingbaseES server.
+    /// </summary>
+    public ReferenceExpression ConnectionStringExpression =>
+        ReferenceExpression.Create(
+            $"Host={PrimaryEndpoint.Property(EndpointProperty.Host)};Port={PrimaryEndpoint.Property(EndpointProperty.Port)};Username={UserNameReference};Password={PasswordParameter}");
+
+    /// <summary>
+    /// Gets the connection string for the KingbaseES server.
+    /// </summary>
+    /// <param name="cancellationToken"> A <see cref="CancellationToken"/> to observe while waiting for the task to complete.</param>
+    /// <returns>A connection string for the KingbaseES server in the form "Host=host;Port=port;Username=system;Password=password".</returns>
+    public ValueTask<string?> GetConnectionStringAsync(CancellationToken cancellationToken = default)
+    {
+        if (this.TryGetLastAnnotation<ConnectionStringRedirectAnnotation>(out var connectionStringAnnotation))
+        {
+            return connectionStringAnnotation.Resource.GetConnectionStringAsync(cancellationToken);
+        }
+
+        return new ValueTask<string?>(ConnectionStringExpression.ValueExpression);
+    }
+
+    /// <summary>
+    /// A dictionary where the key is the resource name and the value is the database name.
+    /// </summary>
+    public Dictionary<string, string> Databases { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+}

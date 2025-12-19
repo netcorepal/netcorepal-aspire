@@ -4,6 +4,7 @@ This repository contains .NET Aspire hosting extensions for various resources.
 
 ## Packages
 
+- **NetCorePal.Aspire.Hosting.KingbaseES** - KingbaseES database support for .NET Aspire applications
 - **NetCorePal.Aspire.Hosting.OpenGauss** - OpenGauss database support for .NET Aspire applications
 
 ## Getting Started

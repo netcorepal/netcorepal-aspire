@@ -1,0 +1,581 @@
+using Aspire.Hosting.ApplicationModel;
+using Aspire.Hosting.KingbaseES;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Npgsql;
+using System.Text;
+using System.Text.Json;
+
+namespace Aspire.Hosting;
+
+/// <summary>
+/// Provides extension methods for adding KingbaseES resources to an <see cref="IDistributedApplicationBuilder"/>.
+/// </summary>
+public static class KingbaseESBuilderExtensions
+{
+    private const int KingbaseESPortDefault = 54321;
+    private const string DefaultKingbaseESUserName = "system";
+    private const string DefaultDatabaseName = "test";
+
+    /// <summary>
+    /// Adds a KingbaseES resource to the application model. A container is used for local development.
+    /// </summary>
+    /// <param name="builder">The <see cref="IDistributedApplicationBuilder"/>.</param>
+    /// <param name="name">The name of the resource. This name will be used as the connection string name when referenced in a dependency.</param>
+    /// <param name="userName">The parameter used to provide the user name for the KingbaseES resource. If <see langword="null"/> a default value will be used.</param>
+    /// <param name="password">The parameter used to provide the administrator password for the KingbaseES resource. If <see langword="null"/> a random password will be generated.</param>
+    /// <param name="port">The host port used when launching the container. If null a random port will be assigned.</param>
+    /// <returns>A reference to the <see cref="IResourceBuilder{KingbaseESServerResource}"/>.</returns>
+    /// <remarks>
+    /// <para>
+    /// This resource includes built-in health checks. When this resource is referenced as a dependency
+    /// using the <see cref="ResourceBuilderExtensions.WaitFor{T}(IResourceBuilder{T}, IResourceBuilder{IResource})"/>
+    /// extension method then the dependent resource will wait until the KingbaseES resource is able to service
+    /// requests.
+    /// </para>
+    /// This version of the package defaults to the <c>v008r006c009b0014-unit</c> tag of the <c>apecloud/kingbase</c> container image.
+    /// </remarks>
+    public static IResourceBuilder<KingbaseESServerResource> AddKingbaseES(
+        this IDistributedApplicationBuilder builder,
+        string name,
+        IResourceBuilder<ParameterResource>? userName = null,
+        IResourceBuilder<ParameterResource>? password = null,
+        int? port = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(name);
+
+        var passwordParameter = password?.Resource ??
+                                ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder,
+                                    $"{name}-password");
+
+        var kingbaseESServer = new KingbaseESServerResource(name, userName?.Resource, passwordParameter);
+
+        // Register a health check that can be associated with the resource so dependent resources can WaitFor() it.
+        var serverHealthCheckKey = $"{name}-kingbasees";
+        builder.Services.AddHealthChecks().AddCheck(
+            serverHealthCheckKey,
+            new KingbaseESConnectionHealthCheck(
+                ct => kingbaseESServer.ConnectionStringExpression.GetValueAsync(ct),
+                DefaultDatabaseName));
+
+        var resourceBuilder = builder.AddResource(kingbaseESServer)
+            .WithContainerRuntimeArgs("--privileged")
+            .WithEndpoint(port: port, targetPort: KingbaseESPortDefault,
+                name: KingbaseESServerResource.PrimaryEndpointName)
+            .WithImage(KingbaseESContainerImageTags.Image, KingbaseESContainerImageTags.Tag)
+            .WithImageRegistry(KingbaseESContainerImageTags.Registry)
+            .WithEnvironment("DB_PASSWORD", kingbaseESServer.PasswordParameter)
+            .WithEnvironment("ALL_NODE_IP", "localhost")
+            .WithEnvironment("REPLICA_COUNT", "1")
+            .WithEnvironment("TRUST_IP", "127.0.0.1")
+            .WithEnvironment("HOSTNAME", $"{name}-0")
+            .WithHealthCheck(serverHealthCheckKey)
+            .PublishAsContainer();
+
+        // Set container hostname for KingbaseES systemd requirements
+        resourceBuilder.Resource.Annotations.Add(new ContainerRuntimeArgsCallbackAnnotation(args =>
+        {
+            args.Add($"--hostname={name}-0");
+        }));
+
+        return resourceBuilder;
+    }
+
+    /// <summary>
+    /// Adds a pgAdmin 4 administration and development platform for KingbaseES/PostgreSQL-compatible servers to the application model.
+    /// </summary>
+    /// <remarks>
+    /// This version of the package defaults to the <c>9.9.0</c> tag of the <c>dpage/pgadmin4</c> container image.
+    /// </remarks>
+    /// <param name="builder">The KingbaseES server resource builder.</param>
+    /// <param name="configureContainer">Callback to configure pgAdmin container resource.</param>
+    /// <param name="containerName">The name of the container (Optional). Defaults to <c>pgadmin</c>.</param>
+    /// <returns>A reference to the <see cref="IResourceBuilder{T}"/>.</returns>
+    public static IResourceBuilder<T> WithPgAdmin<T>(
+        this IResourceBuilder<T> builder,
+        Action<IResourceBuilder<PgAdminContainerResource>>? configureContainer = null,
+        string? containerName = null)
+        where T : KingbaseESServerResource
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (builder.ApplicationBuilder.Resources.OfType<PgAdminContainerResource>().SingleOrDefault() is { } existingPgAdminResource)
+        {
+            var builderForExistingResource = builder.ApplicationBuilder.CreateResourceBuilder(existingPgAdminResource);
+            configureContainer?.Invoke(builderForExistingResource);
+            return builder;
+        }
+
+        containerName ??= "pgadmin";
+
+        var pgAdminContainer = new PgAdminContainerResource(containerName);
+        var pgAdminContainerBuilder = builder.ApplicationBuilder.AddResource(pgAdminContainer)
+            .WithImage(KingbaseESContainerImageTags.PgAdminImage, KingbaseESContainerImageTags.PgAdminTag)
+            .WithImageRegistry(KingbaseESContainerImageTags.PgAdminRegistry)
+            .WithHttpEndpoint(targetPort: 80, name: "http")
+            .WithEnvironment(SetPgAdminEnvironmentVariables)
+            .WithHttpHealthCheck("/browser")
+            .ExcludeFromManifest();
+
+        pgAdminContainerBuilder.WithContainerFiles(
+            destinationPath: "/pgadmin4",
+            callback: async (context, cancellationToken) =>
+            {
+                var kingbaseESInstances = builder.ApplicationBuilder.Resources.OfType<KingbaseESServerResource>();
+
+                return [
+                    new ContainerFile
+                    {
+                        Name = "servers.json",
+                        Contents = await WritePgAdminServerJson(kingbaseESInstances, cancellationToken).ConfigureAwait(false),
+                    },
+                ];
+            });
+
+        configureContainer?.Invoke(pgAdminContainerBuilder);
+        pgAdminContainerBuilder.WithRelationship(builder.Resource, "PgAdmin");
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Configures the host port that the pgAdmin resource is exposed on instead of using randomly assigned port.
+    /// </summary>
+    /// <param name="builder">The resource builder for pgAdmin.</param>
+    /// <param name="port">The port to bind on the host. If <see langword="null"/> is used random port will be assigned.</param>
+    /// <returns>The resource builder for pgAdmin.</returns>
+    public static IResourceBuilder<PgAdminContainerResource> WithHostPort(this IResourceBuilder<PgAdminContainerResource> builder, int? port)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithEndpoint("http", endpoint =>
+        {
+            endpoint.Port = port;
+        });
+    }
+
+    /// <summary>
+    /// Adds an administration and development platform for KingbaseES/PostgreSQL-compatible databases to the application model using pgweb.
+    /// </summary>
+    /// <remarks>
+    /// This version of the package defaults to the <c>0.16.2</c> tag of the <c>sosedoff/pgweb</c> container image.
+    /// </remarks>
+    /// <param name="builder">The KingbaseES server resource builder.</param>
+    /// <param name="configureContainer">Configuration callback for pgweb container resource.</param>
+    /// <param name="containerName">The name of the container (Optional). Defaults to <c>pgweb</c>.</param>
+    /// <returns>A reference to the <see cref="IResourceBuilder{KingbaseESServerResource}"/>.</returns>
+    public static IResourceBuilder<KingbaseESServerResource> WithPgWeb(
+        this IResourceBuilder<KingbaseESServerResource> builder,
+        Action<IResourceBuilder<PgWebContainerResource>>? configureContainer = null,
+        string? containerName = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (builder.ApplicationBuilder.Resources.OfType<PgWebContainerResource>().SingleOrDefault() is { } existingPgWebResource)
+        {
+            var builderForExistingResource = builder.ApplicationBuilder.CreateResourceBuilder(existingPgWebResource);
+            configureContainer?.Invoke(builderForExistingResource);
+            return builder;
+        }
+
+        containerName ??= "pgweb";
+
+        var pgwebContainer = new PgWebContainerResource(containerName);
+        var pgwebContainerBuilder = builder.ApplicationBuilder.AddResource(pgwebContainer)
+            .WithImage(KingbaseESContainerImageTags.PgWebImage, KingbaseESContainerImageTags.PgWebTag)
+            .WithImageRegistry(KingbaseESContainerImageTags.PgWebRegistry)
+            .WithHttpEndpoint(targetPort: 8081, name: "http")
+            .WithArgs("--bookmarks-dir=/.pgweb/bookmarks")
+            .WithArgs("--sessions")
+            .ExcludeFromManifest();
+
+        configureContainer?.Invoke(pgwebContainerBuilder);
+        pgwebContainerBuilder.WithRelationship(builder.Resource, "PgWeb");
+        pgwebContainerBuilder.WithHttpHealthCheck();
+
+        pgwebContainerBuilder.WithContainerFiles(
+            destinationPath: "/",
+            callback: async (_, ct) =>
+            {
+                var databases = builder.ApplicationBuilder.Resources.OfType<KingbaseESDatabaseResource>();
+                var servers = builder.ApplicationBuilder.Resources.OfType<KingbaseESServerResource>();
+
+                return [
+                    new ContainerDirectory
+                    {
+                        Name = ".pgweb",
+                        Entries = [
+                            new ContainerDirectory
+                            {
+                                Name = "bookmarks",
+                                Entries = await WritePgWebBookmarks(databases, servers, ct).ConfigureAwait(false)
+                            },
+                        ],
+                    },
+                ];
+            });
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Configures the host port that the pgweb resource is exposed on instead of using randomly assigned port.
+    /// </summary>
+    /// <param name="builder">The resource builder for pgweb.</param>
+    /// <param name="port">The port to bind on the host. If <see langword="null"/> is used random port will be assigned.</param>
+    /// <returns>The resource builder for pgweb.</returns>
+    public static IResourceBuilder<PgWebContainerResource> WithHostPort(this IResourceBuilder<PgWebContainerResource> builder, int? port)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithEndpoint("http", endpoint =>
+        {
+            endpoint.Port = port;
+        });
+    }
+
+    private static async Task<IEnumerable<ContainerFileSystemItem>> WritePgWebBookmarks(
+        IEnumerable<KingbaseESDatabaseResource> kingbaseESDatabases,
+        IEnumerable<KingbaseESServerResource> kingbaseESServers,
+        CancellationToken cancellationToken)
+    {
+        var bookmarkFiles = new List<ContainerFileSystemItem>();
+        var bookmarkNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var kingbaseESDatabase in kingbaseESDatabases)
+        {
+            var user = kingbaseESDatabase.Parent.UserNameParameter is null
+                ? DefaultKingbaseESUserName
+                : await kingbaseESDatabase.Parent.UserNameParameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+
+            var password = await kingbaseESDatabase.Parent.PasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false) ?? "password";
+
+            // pgweb assumes KingbaseES is being accessed over a default Aspire container network and hardcodes the resource address.
+                var fileContent = $"""
+                    host = "{kingbaseESDatabase.Parent.Name}"
+                    port = {kingbaseESDatabase.Parent.PrimaryEndpoint.TargetPort}
+                    user = "{user}"
+                    password = "{password}"
+                    database = "{kingbaseESDatabase.DatabaseName}"
+                    sslmode = "disable"
+                    """;
+
+            bookmarkFiles.Add(new ContainerFile
+            {
+                Name = $"{kingbaseESDatabase.Name}.toml",
+                Contents = fileContent,
+            });
+
+            bookmarkNames.Add($"{kingbaseESDatabase.Name}.toml");
+        }
+
+        // If there are no database resources, pgweb would start with an empty bookmarks directory.
+        // Add a sensible default bookmark per server to improve the out-of-box experience.
+        if (!bookmarkFiles.OfType<ContainerFile>().Any())
+        {
+            foreach (var kingbaseESServer in kingbaseESServers)
+            {
+                var bookmarkFileName = $"{kingbaseESServer.Name}.toml";
+                if (!bookmarkNames.Add(bookmarkFileName))
+                {
+                    continue;
+                }
+
+                var user = kingbaseESServer.UserNameParameter is null
+                    ? DefaultKingbaseESUserName
+                    : await kingbaseESServer.UserNameParameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+
+                var password = await kingbaseESServer.PasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false) ?? "password";
+
+                // Default database should be "test" when no database resources are defined.
+                var databaseName = DefaultDatabaseName;
+
+                var fileContent = $"""
+                    host = "{kingbaseESServer.Name}"
+                    port = {kingbaseESServer.PrimaryEndpoint.TargetPort}
+                    user = "{user}"
+                    password = "{password}"
+                    database = "{databaseName}"
+                    sslmode = "disable"
+                    """;
+
+                bookmarkFiles.Add(new ContainerFile
+                {
+                    Name = bookmarkFileName,
+                    Contents = fileContent,
+                });
+            }
+        }
+
+        return bookmarkFiles;
+    }
+
+    private static async Task<string> WritePgAdminServerJson(
+        IEnumerable<KingbaseESServerResource> kingbaseESServers,
+        CancellationToken cancellationToken)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+
+        writer.WriteStartObject();
+        writer.WriteStartObject("Servers");
+
+        var serverIndex = 1;
+        foreach (var kingbaseESServer in kingbaseESServers)
+        {
+            var endpoint = kingbaseESServer.PrimaryEndpoint;
+            var userName = kingbaseESServer.UserNameParameter is null
+                ? DefaultKingbaseESUserName
+                : await kingbaseESServer.UserNameParameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+
+            var password = await kingbaseESServer.PasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+
+            writer.WriteStartObject($"{serverIndex}");
+            writer.WriteString("Name", kingbaseESServer.Name);
+            writer.WriteString("Group", "Servers");
+
+            // pgAdmin assumes KingbaseES is being accessed over a default Aspire container network and hardcodes the resource address.
+            writer.WriteString("Host", endpoint.Resource.Name);
+            writer.WriteNumber("Port", (int)endpoint.TargetPort!);
+            writer.WriteString("Username", userName);
+            writer.WriteString("SSLMode", "prefer");
+            writer.WriteString("MaintenanceDB", "test");
+            writer.WriteString("PasswordExecCommand", $"echo '{password}'");
+            writer.WriteEndObject();
+
+            serverIndex++;
+        }
+
+        writer.WriteEndObject();
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void SetPgAdminEnvironmentVariables(EnvironmentCallbackContext context)
+    {
+        context.EnvironmentVariables["PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED"] = "False";
+        context.EnvironmentVariables["PGADMIN_CONFIG_SERVER_MODE"] = "False";
+        context.EnvironmentVariables["PGADMIN_DEFAULT_EMAIL"] = "admin@domain.com";
+        context.EnvironmentVariables["PGADMIN_DEFAULT_PASSWORD"] = "admin";
+
+        var config = context.ExecutionContext.ServiceProvider.GetRequiredService<IConfiguration>();
+        if (context.ExecutionContext.IsRunMode && config.GetValue<bool>("CODESPACES", false))
+        {
+            context.EnvironmentVariables["PGADMIN_CONFIG_PROXY_X_HOST_COUNT"] = "1";
+            context.EnvironmentVariables["PGADMIN_CONFIG_PROXY_X_PREFIX_COUNT"] = "1";
+        }
+    }
+
+    /// <summary>
+    /// Adds a KingbaseES database to the application model.
+    /// </summary>
+    /// <param name="builder">The KingbaseES server resource builder.</param>
+    /// <param name="name">The name of the resource. This name will be used as the connection string name when referenced in a dependency.</param>
+    /// <param name="databaseName">The name of the database. If not provided, this defaults to the same value as <paramref name="name"/>.</param>
+    /// <returns>A reference to the <see cref="IResourceBuilder{KingbaseESDatabaseResource}"/>.</returns>
+    /// <remarks>
+    /// <para>
+    /// This resource includes built-in health checks. When this resource is referenced as a dependency
+    /// using the <see cref="ResourceBuilderExtensions.WaitFor{T}(IResourceBuilder{T}, IResourceBuilder{IResource})"/>
+    /// extension method then the dependent resource will wait until the KingbaseES database is available.
+    /// </para>
+    /// </remarks>
+    public static IResourceBuilder<KingbaseESDatabaseResource> AddDatabase(
+        this IResourceBuilder<KingbaseESServerResource> builder,
+        string name,
+        string? databaseName = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(name);
+
+        // Use the resource name as the database name if it's not provided
+        databaseName ??= name;
+
+        builder.Resource.Databases.TryAdd(name, databaseName);
+        var kingbaseESDatabase = new KingbaseESDatabaseResource(name, databaseName, builder.Resource);
+
+        var databaseHealthCheckKey = $"{builder.Resource.Name}-{name}-kingbaseesdb";
+        builder.ApplicationBuilder.Services.AddHealthChecks().AddCheck(
+            databaseHealthCheckKey,
+            new KingbaseESConnectionHealthCheck(
+                ct => kingbaseESDatabase.ConnectionStringExpression.GetValueAsync(ct),
+                databaseName));
+
+        return builder.ApplicationBuilder.AddResource(kingbaseESDatabase)
+            .WithHealthCheck(databaseHealthCheckKey);
+    }
+
+    private sealed class KingbaseESConnectionHealthCheck : IHealthCheck
+    {
+        private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(3);
+
+        private readonly Func<CancellationToken, ValueTask<string?>> _getConnectionString;
+        private readonly string _databaseName;
+
+        public KingbaseESConnectionHealthCheck(Func<CancellationToken, ValueTask<string?>> getConnectionString, string databaseName)
+        {
+            _getConnectionString = getConnectionString;
+            _databaseName = databaseName;
+        }
+
+        public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+        {
+            string? connectionString;
+            try
+            {
+                connectionString = await _getConnectionString(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return HealthCheckResult.Unhealthy("Failed to resolve KingbaseES connection string.", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return HealthCheckResult.Unhealthy("KingbaseES connection string is empty.");
+            }
+
+            // If the value provider hasn't resolved yet, the connection string may still contain
+            // Aspire manifest placeholders like "{resource.bindings.tcp.host}".
+            if (connectionString.Contains(".bindings.", StringComparison.Ordinal))
+            {
+                return HealthCheckResult.Unhealthy("KingbaseES connection string is not resolved yet.");
+            }
+
+            try
+            {
+                var csb = new NpgsqlConnectionStringBuilder(connectionString)
+                {
+                    Timeout = (int)DefaultTimeout.TotalSeconds,
+                    CommandTimeout = (int)DefaultTimeout.TotalSeconds,
+                    Database = string.IsNullOrWhiteSpace(_databaseName) ? DefaultDatabaseName : _databaseName,
+                };
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(DefaultTimeout);
+
+                await using var connection = new NpgsqlConnection(csb.ConnectionString);
+                await connection.OpenAsync(timeoutCts.Token).ConfigureAwait(false);
+
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT 1;";
+                var result = await command.ExecuteScalarAsync(timeoutCts.Token).ConfigureAwait(false);
+
+                return result is null
+                    ? HealthCheckResult.Unhealthy("KingbaseES ping returned null.")
+                    : HealthCheckResult.Healthy();
+            }
+            catch (Exception ex)
+            {
+                return HealthCheckResult.Unhealthy("KingbaseES is not ready.", ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds a named volume for the data folder to a KingbaseES container resource.
+    /// </summary>
+    /// <param name="builder">The resource builder.</param>
+    /// <param name="name">The name of the volume. Defaults to an auto-generated name based on the application and resource names.</param>
+    /// <param name="isReadOnly">A flag that indicates if this is a read-only volume.</param>
+    /// <returns>The <see cref="IResourceBuilder{KingbaseESServerResource}"/>.</returns>
+    public static IResourceBuilder<KingbaseESServerResource> WithDataVolume(
+        this IResourceBuilder<KingbaseESServerResource> builder,
+        string? name = null,
+        bool isReadOnly = false)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithVolume(name ?? $"{builder.Resource.Name}-data", "/home/kingbase/cluster/data", isReadOnly);
+    }
+
+    /// <summary>
+    /// Adds a bind mount for the data folder to a KingbaseES container resource.
+    /// </summary>
+    /// <param name="builder">The resource builder.</param>
+    /// <param name="source">The source directory on the host to mount into the container.</param>
+    /// <param name="isReadOnly">A flag that indicates if this is a read-only mount.</param>
+    /// <returns>The <see cref="IResourceBuilder{KingbaseESServerResource}"/>.</returns>
+    public static IResourceBuilder<KingbaseESServerResource> WithDataBindMount(
+        this IResourceBuilder<KingbaseESServerResource> builder,
+        string source,
+        bool isReadOnly = false)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(source);
+
+        return builder.WithBindMount(source, "/home/kingbase/cluster/data", isReadOnly);
+    }
+
+    /// <summary>
+    /// Adds a bind mount for the init folder to a KingbaseES container resource.
+    /// </summary>
+    /// <param name="builder">The resource builder.</param>
+    /// <param name="source">The source directory on the host to mount into the container.</param>
+    /// <param name="isReadOnly">A flag that indicates if this is a read-only mount.</param>
+    /// <returns>The <see cref="IResourceBuilder{KingbaseESServerResource}"/>.</returns>
+    public static IResourceBuilder<KingbaseESServerResource> WithInitBindMount(
+        this IResourceBuilder<KingbaseESServerResource> builder,
+        string source,
+        bool isReadOnly = false)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(source);
+
+        return builder.WithBindMount(source, "/docker-entrypoint-initdb.d", isReadOnly);
+    }
+
+    /// <summary>
+    /// Configures the password that the KingbaseES resource uses.
+    /// </summary>
+    /// <param name="builder">The resource builder.</param>
+    /// <param name="password">The parameter used to provide the password for the KingbaseES resource.</param>
+    /// <returns>The <see cref="IResourceBuilder{KingbaseESServerResource}"/>.</returns>
+    public static IResourceBuilder<KingbaseESServerResource> WithPassword(
+        this IResourceBuilder<KingbaseESServerResource> builder,
+        IResourceBuilder<ParameterResource> password)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(password);
+
+        builder.Resource.PasswordParameter = password.Resource;
+        builder.WithEnvironment("DB_PASSWORD", password.Resource);
+        return builder;
+    }
+
+    /// <summary>
+    /// Configures the user name that the KingbaseES resource uses.
+    /// </summary>
+    /// <param name="builder">The resource builder.</param>
+    /// <param name="userName">The parameter used to provide the user name for the KingbaseES resource.</param>
+    /// <returns>The <see cref="IResourceBuilder{KingbaseESServerResource}"/>.</returns>
+    public static IResourceBuilder<KingbaseESServerResource> WithUserName(
+        this IResourceBuilder<KingbaseESServerResource> builder,
+        IResourceBuilder<ParameterResource> userName)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(userName);
+
+        builder.Resource.UserNameParameter = userName.Resource;
+        return builder;
+    }
+
+    /// <summary>
+    /// Configures the host port that the KingbaseES resource is exposed on instead of using randomly assigned port.
+    /// </summary>
+    /// <param name="builder">The resource builder.</param>
+    /// <param name="port">The port to bind on the host. If <see langword="null"/> is used random port will be assigned.</param>
+    /// <returns>The <see cref="IResourceBuilder{KingbaseESServerResource}"/>.</returns>
+    public static IResourceBuilder<KingbaseESServerResource> WithHostPort(
+        this IResourceBuilder<KingbaseESServerResource> builder,
+        int? port)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithEndpoint(KingbaseESServerResource.PrimaryEndpointName, endpoint => { endpoint.Port = port; });
+    }
+}

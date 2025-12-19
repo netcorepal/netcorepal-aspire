@@ -5,12 +5,15 @@
     <Platform Name="x86" />
   </Configurations>
   <Folder Name="/examples/">
+    <Project Path="examples/KingbaseESExample/KingbaseESExample.csproj" />
     <Project Path="examples/OpenGaussExample/OpenGaussExample.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/NetCorePal.Aspire.Hosting.KingbaseES/NetCorePal.Aspire.Hosting.KingbaseES.csproj" />
     <Project Path="src/NetCorePal.Aspire.Hosting.OpenGauss/NetCorePal.Aspire.Hosting.OpenGauss.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/NetCorePal.Aspire.Hosting.KingbaseES.Tests/NetCorePal.Aspire.Hosting.KingbaseES.Tests.csproj" />
     <Project Path="tests/NetCorePal.Aspire.Hosting.OpenGauss.Tests/NetCorePal.Aspire.Hosting.OpenGauss.Tests.csproj" />
   </Folder>
 </Solution>

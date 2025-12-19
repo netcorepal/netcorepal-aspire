@@ -1,0 +1,12 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.1.0">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>e4c266fb-5b07-45ff-9c58-e8e40f82147c</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NetCorePal.Aspire.Hosting.KingbaseES\NetCorePal.Aspire.Hosting.KingbaseES.csproj" IsAspireProjectResource="false" />
+  </ItemGroup>
+</Project>
