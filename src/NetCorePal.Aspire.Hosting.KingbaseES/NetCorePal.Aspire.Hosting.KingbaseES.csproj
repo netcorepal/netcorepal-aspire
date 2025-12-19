@@ -16,4 +16,12 @@
     <PackageReference Include="Npgsql" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="kingbase-init.sh">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>true</Pack>
+      <PackagePath>content</PackagePath>
+    </None>
+  </ItemGroup>
+
 </Project>

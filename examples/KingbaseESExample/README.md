@@ -28,3 +28,20 @@ After running the application, you can access:
 - **pgweb**: Lightweight web-based database browser
 
 Check the Aspire Dashboard for the actual assigned ports and connection strings.
+
+## Important: Container Initialization
+
+**Note:** The KingbaseES container requires manual initialization after startup. The container does not automatically start the database service.
+
+To initialize the container after it starts:
+
+```bash
+# Find the container name from Docker
+docker ps | grep kingbase
+
+# Execute initialization commands
+docker exec <container-name> sh -c "pgrep -x sshd >/dev/null 2>&1 || { ssh-keygen -A && /usr/sbin/sshd -D &; sleep 1; }"
+docker exec <container-name> sh -c "HOSTNAME=\$(hostname) /home/kingbase/cluster/bin/docker-entrypoint.sh"
+```
+
+For automatic initialization, consider creating a custom Docker image. See the package README for more details.

@@ -34,6 +34,11 @@ public static class KingbaseESBuilderExtensions
     /// extension method then the dependent resource will wait until the KingbaseES resource is able to service
     /// requests.
     /// </para>
+    /// <para>
+    /// <b>Important:</b> The KingbaseES container image requires manual initialization after startup.
+    /// The container does not automatically start the database service. See the package README for workarounds
+    /// including using a custom Dockerfile with automatic initialization.
+    /// </para>
     /// This version of the package defaults to the <c>v008r006c009b0014-unit</c> tag of the <c>apecloud/kingbase</c> container image.
     /// </remarks>
     public static IResourceBuilder<KingbaseESServerResource> AddKingbaseES(
