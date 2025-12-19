@@ -38,21 +38,21 @@ public static class OpenGaussBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(name);
 
-        var passwordParameter = password?.Resource ?? ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder, $"{name}-password");
+        var passwordParameter = password?.Resource ??
+                                ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder,
+                                    $"{name}-password");
 
         var openGaussServer = new OpenGaussServerResource(name, userName?.Resource, passwordParameter);
 
         return builder.AddResource(openGaussServer)
-                      .WithEndpoint(port: port, targetPort: OpenGaussPortDefault, name: OpenGaussServerResource.PrimaryEndpointName)
-                      .WithImage(OpenGaussContainerImageTags.Image, OpenGaussContainerImageTags.Tag)
-                      .WithImageRegistry(OpenGaussContainerImageTags.Registry)
-                      .WithEnvironment("GS_PASSWORD", openGaussServer.PasswordParameter)
-                      .WithEnvironment("PGPASSWORD", openGaussServer.PasswordParameter) // OpenGauss is PostgreSQL-compatible and uses PGPASSWORD for client authentication
-                      .WithAnnotation(new CommandLineArgsCallbackAnnotation(args =>
-                      {
-                          args.Add("--privileged");
-                      }))
-                      .PublishAsContainer();
+            .WithContainerRuntimeArgs("--privileged")
+            .WithEndpoint(port: port, targetPort: OpenGaussPortDefault,
+                name: OpenGaussServerResource.PrimaryEndpointName)
+            .WithImage(OpenGaussContainerImageTags.Image, OpenGaussContainerImageTags.Tag)
+            .WithImageRegistry(OpenGaussContainerImageTags.Registry)
+            .WithEnvironment("GS_PASSWORD", openGaussServer.PasswordParameter)
+            .WithEnvironment("PGPASSWORD", openGaussServer.PasswordParameter) // OpenGauss is PostgreSQL-compatible and uses PGPASSWORD for client authentication
+            .PublishAsContainer();
     }
 
     /// <summary>
@@ -154,6 +154,9 @@ public static class OpenGaussBuilderExtensions
         ArgumentNullException.ThrowIfNull(password);
 
         builder.Resource.PasswordParameter = password.Resource;
+        builder.WithEnvironment("GS_PASSWORD", password.Resource)
+            .WithEnvironment("PGPASSWORD",
+                password.Resource); // OpenGauss is PostgreSQL-compatible and uses PGPASSWORD for client authentication   
         return builder;
     }
 
@@ -186,10 +189,7 @@ public static class OpenGaussBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        return builder.WithEndpoint(OpenGaussServerResource.PrimaryEndpointName, endpoint =>
-        {
-            endpoint.Port = port;
-        });
+        return builder.WithEndpoint(OpenGaussServerResource.PrimaryEndpointName, endpoint => { endpoint.Port = port; });
     }
 
     /// <summary>
@@ -205,9 +205,6 @@ public static class OpenGaussBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        return builder.WithAnnotation(new CommandLineArgsCallbackAnnotation(args =>
-        {
-            args.Add("--privileged");
-        }));
+        return builder.WithAnnotation(new CommandLineArgsCallbackAnnotation(args => { args.Add("--privileged"); }));
     }
 }

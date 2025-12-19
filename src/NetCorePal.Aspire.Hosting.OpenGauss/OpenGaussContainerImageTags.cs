@@ -9,5 +9,5 @@ internal static class OpenGaussContainerImageTags
     public const string Image = "opengauss/opengauss";
 
     /// <remarks>6.0.0</remarks>
-    public const string Tag = "6.0.0";
+    public const string Tag = "latest";
 }
