@@ -42,6 +42,31 @@ public class OpenGaussBuilderExtensionsTests
     }
 
     [Fact]
+    public void AddOpenGaussAddsHealthCheckAnnotation()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var opengauss = builder.AddOpenGauss("opengauss");
+
+        var annotation = opengauss.Resource.Annotations.OfType<HealthCheckAnnotation>().FirstOrDefault();
+
+        Assert.NotNull(annotation);
+        Assert.False(string.IsNullOrWhiteSpace(annotation!.Key));
+    }
+
+    [Fact]
+    public void AddDatabaseAddsHealthCheckAnnotation()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var opengauss = builder.AddOpenGauss("opengauss");
+        var database = opengauss.AddDatabase("mydb");
+
+        var annotation = database.Resource.Annotations.OfType<HealthCheckAnnotation>().FirstOrDefault();
+
+        Assert.NotNull(annotation);
+        Assert.False(string.IsNullOrWhiteSpace(annotation!.Key));
+    }
+
+    [Fact]
     public void AddOpenGaussWithCustomUserNameUsesProvidedUserName()
     {
         var builder = DistributedApplication.CreateBuilder();

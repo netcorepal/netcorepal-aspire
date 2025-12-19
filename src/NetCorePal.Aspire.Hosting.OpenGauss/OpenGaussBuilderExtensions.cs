@@ -2,6 +2,8 @@ using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.OpenGauss;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Npgsql;
 using System.Text;
 using System.Text.Json;
 
@@ -14,6 +16,7 @@ public static class OpenGaussBuilderExtensions
 {
     private const int OpenGaussPortDefault = 5432;
     private const string DefaultOpenGaussUserName = "gaussdb";
+    private const string DefaultDatabaseName = "postgres";
 
     /// <summary>
     /// Adds an OpenGauss resource to the application model. A container is used for local development.
@@ -49,6 +52,14 @@ public static class OpenGaussBuilderExtensions
 
         var openGaussServer = new OpenGaussServerResource(name, userName?.Resource, passwordParameter);
 
+        // Register a health check that can be associated with the resource so dependent resources can WaitFor() it.
+        var serverHealthCheckKey = $"{name}-opengauss";
+        builder.Services.AddHealthChecks().AddCheck(
+            serverHealthCheckKey,
+            new OpenGaussConnectionHealthCheck(
+                ct => openGaussServer.ConnectionStringExpression.GetValueAsync(ct),
+                DefaultDatabaseName));
+
         return builder.AddResource(openGaussServer)
             .WithContainerRuntimeArgs("--privileged")
             .WithEndpoint(port: port, targetPort: OpenGaussPortDefault,
@@ -57,6 +68,7 @@ public static class OpenGaussBuilderExtensions
             .WithImageRegistry(OpenGaussContainerImageTags.Registry)
             .WithEnvironment("GS_PASSWORD", openGaussServer.PasswordParameter)
             .WithEnvironment("PGPASSWORD", openGaussServer.PasswordParameter) // OpenGauss is PostgreSQL-compatible and uses PGPASSWORD for client authentication
+            .WithHealthCheck(serverHealthCheckKey)
             .PublishAsContainer();
     }
 
@@ -267,7 +279,7 @@ public static class OpenGaussBuilderExtensions
                 var password = await openGaussServer.PasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false) ?? "password";
 
                 // Default database should be "postgres" when no database resources are defined.
-                const string databaseName = "postgres";
+                var databaseName = DefaultDatabaseName;
 
                 var fileContent = $"""
                     host = "{openGaussServer.Name}"
@@ -375,8 +387,83 @@ public static class OpenGaussBuilderExtensions
         builder.Resource.Databases.TryAdd(name, databaseName);
         builder.WithEnvironment("GS_DB", databaseName);
         var openGaussDatabase = new OpenGaussDatabaseResource(name, databaseName, builder.Resource);
-        
-        return builder.ApplicationBuilder.AddResource(openGaussDatabase);
+
+        var databaseHealthCheckKey = $"{builder.Resource.Name}-{name}-opengaussdb";
+        builder.ApplicationBuilder.Services.AddHealthChecks().AddCheck(
+            databaseHealthCheckKey,
+            new OpenGaussConnectionHealthCheck(
+                ct => openGaussDatabase.ConnectionStringExpression.GetValueAsync(ct),
+                databaseName));
+
+        return builder.ApplicationBuilder.AddResource(openGaussDatabase)
+            .WithHealthCheck(databaseHealthCheckKey);
+    }
+
+    private sealed class OpenGaussConnectionHealthCheck : IHealthCheck
+    {
+        private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(3);
+
+        private readonly Func<CancellationToken, ValueTask<string?>> _getConnectionString;
+        private readonly string _databaseName;
+
+        public OpenGaussConnectionHealthCheck(Func<CancellationToken, ValueTask<string?>> getConnectionString, string databaseName)
+        {
+            _getConnectionString = getConnectionString;
+            _databaseName = databaseName;
+        }
+
+        public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+        {
+            string? connectionString;
+            try
+            {
+                connectionString = await _getConnectionString(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return HealthCheckResult.Unhealthy("Failed to resolve OpenGauss connection string.", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return HealthCheckResult.Unhealthy("OpenGauss connection string is empty.");
+            }
+
+            // If the value provider hasn't resolved yet, the connection string may still contain
+            // Aspire manifest placeholders like "{resource.bindings.tcp.host}".
+            if (connectionString.Contains(".bindings.", StringComparison.Ordinal))
+            {
+                return HealthCheckResult.Unhealthy("OpenGauss connection string is not resolved yet.");
+            }
+
+            try
+            {
+                var csb = new NpgsqlConnectionStringBuilder(connectionString)
+                {
+                    Timeout = (int)DefaultTimeout.TotalSeconds,
+                    CommandTimeout = (int)DefaultTimeout.TotalSeconds,
+                    Database = string.IsNullOrWhiteSpace(_databaseName) ? DefaultDatabaseName : _databaseName,
+                };
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(DefaultTimeout);
+
+                await using var connection = new NpgsqlConnection(csb.ConnectionString);
+                await connection.OpenAsync(timeoutCts.Token).ConfigureAwait(false);
+
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT 1;";
+                var result = await command.ExecuteScalarAsync(timeoutCts.Token).ConfigureAwait(false);
+
+                return result is null
+                    ? HealthCheckResult.Unhealthy("OpenGauss ping returned null.")
+                    : HealthCheckResult.Healthy();
+            }
+            catch (Exception ex)
+            {
+                return HealthCheckResult.Unhealthy("OpenGauss is not ready.", ex);
+            }
+        }
     }
 
     /// <summary>
