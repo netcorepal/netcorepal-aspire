@@ -31,7 +31,7 @@ public static class OpenGaussBuilderExtensions
     /// extension method then the dependent resource will wait until the OpenGauss resource is able to service
     /// requests.
     /// </para>
-    /// This version of the package defaults to the <c>6.0.0</c> tag of the <c>opengauss/opengauss</c> container image.
+    /// This version of the package defaults to the <c>latest</c> tag of the <c>opengauss/opengauss</c> container image.
     /// </remarks>
     public static IResourceBuilder<OpenGaussServerResource> AddOpenGauss(
         this IDistributedApplicationBuilder builder,
@@ -177,6 +177,7 @@ public static class OpenGaussBuilderExtensions
             callback: async (_, ct) =>
             {
                 var databases = builder.ApplicationBuilder.Resources.OfType<OpenGaussDatabaseResource>();
+                var servers = builder.ApplicationBuilder.Resources.OfType<OpenGaussServerResource>();
 
                 return [
                     new ContainerDirectory
@@ -186,7 +187,7 @@ public static class OpenGaussBuilderExtensions
                             new ContainerDirectory
                             {
                                 Name = "bookmarks",
-                                Entries = await WritePgWebBookmarks(databases, ct).ConfigureAwait(false)
+                                Entries = await WritePgWebBookmarks(databases, servers, ct).ConfigureAwait(false)
                             },
                         ],
                     },
@@ -214,9 +215,11 @@ public static class OpenGaussBuilderExtensions
 
     private static async Task<IEnumerable<ContainerFileSystemItem>> WritePgWebBookmarks(
         IEnumerable<OpenGaussDatabaseResource> openGaussDatabases,
+        IEnumerable<OpenGaussServerResource> openGaussServers,
         CancellationToken cancellationToken)
     {
         var bookmarkFiles = new List<ContainerFileSystemItem>();
+        var bookmarkNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var openGaussDatabase in openGaussDatabases)
         {
@@ -227,13 +230,13 @@ public static class OpenGaussBuilderExtensions
             var password = await openGaussDatabase.Parent.PasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false) ?? "password";
 
             // pgweb assumes OpenGauss is being accessed over a default Aspire container network and hardcodes the resource address.
-            var fileContent = $"""
-                    host = \"{openGaussDatabase.Parent.Name}\"
+                var fileContent = $"""
+                    host = "{openGaussDatabase.Parent.Name}"
                     port = {openGaussDatabase.Parent.PrimaryEndpoint.TargetPort}
-                    user = \"{user}\"
-                    password = \"{password}\"
-                    database = \"{openGaussDatabase.DatabaseName}\"
-                    sslmode = \"disable\"
+                    user = "{user}"
+                    password = "{password}"
+                    database = "{openGaussDatabase.DatabaseName}"
+                    sslmode = "disable"
                     """;
 
             bookmarkFiles.Add(new ContainerFile
@@ -241,6 +244,46 @@ public static class OpenGaussBuilderExtensions
                 Name = $"{openGaussDatabase.Name}.toml",
                 Contents = fileContent,
             });
+
+            bookmarkNames.Add($"{openGaussDatabase.Name}.toml");
+        }
+
+        // If there are no database resources, pgweb would start with an empty bookmarks directory.
+        // Add a sensible default bookmark per server to improve the out-of-box experience.
+        if (!bookmarkFiles.OfType<ContainerFile>().Any())
+        {
+            foreach (var openGaussServer in openGaussServers)
+            {
+                var bookmarkFileName = $"{openGaussServer.Name}.toml";
+                if (!bookmarkNames.Add(bookmarkFileName))
+                {
+                    continue;
+                }
+
+                var user = openGaussServer.UserNameParameter is null
+                    ? DefaultOpenGaussUserName
+                    : await openGaussServer.UserNameParameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+
+                var password = await openGaussServer.PasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false) ?? "password";
+
+                // Default database should be "postgres" when no database resources are defined.
+                const string databaseName = "postgres";
+
+                var fileContent = $"""
+                    host = "{openGaussServer.Name}"
+                    port = {openGaussServer.PrimaryEndpoint.TargetPort}
+                    user = "{user}"
+                    password = "{password}"
+                    database = "{databaseName}"
+                    sslmode = "disable"
+                    """;
+
+                bookmarkFiles.Add(new ContainerFile
+                {
+                    Name = bookmarkFileName,
+                    Contents = fileContent,
+                });
+            }
         }
 
         return bookmarkFiles;
@@ -330,9 +373,9 @@ public static class OpenGaussBuilderExtensions
         databaseName ??= name;
 
         builder.Resource.Databases.TryAdd(name, databaseName);
-
+        builder.WithEnvironment("GS_DB", databaseName);
         var openGaussDatabase = new OpenGaussDatabaseResource(name, databaseName, builder.Resource);
-
+        
         return builder.ApplicationBuilder.AddResource(openGaussDatabase);
     }
 
@@ -439,21 +482,5 @@ public static class OpenGaussBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
 
         return builder.WithEndpoint(OpenGaussServerResource.PrimaryEndpointName, endpoint => { endpoint.Port = port; });
-    }
-
-    /// <summary>
-    /// Runs the OpenGauss container in privileged mode.
-    /// </summary>
-    /// <param name="builder">The resource builder.</param>
-    /// <returns>The <see cref="IResourceBuilder{OpenGaussServerResource}"/>.</returns>
-    /// <remarks>
-    /// OpenGauss may require privileged mode for certain operations. Use this method with caution as it grants extended privileges to the container.
-    /// </remarks>
-    public static IResourceBuilder<OpenGaussServerResource> RunAsPrivileged(
-        this IResourceBuilder<OpenGaussServerResource> builder)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-
-        return builder.WithAnnotation(new CommandLineArgsCallbackAnnotation(args => { args.Add("--privileged"); }));
     }
 }

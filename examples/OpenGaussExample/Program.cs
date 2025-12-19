@@ -13,6 +13,5 @@ var opengauss = builder.AddOpenGauss("opengauss")
 
 // Add a database
 var database = opengauss.AddDatabase("mydb");
-
 // Uncomment the following line to actually run the application
 builder.Build().Run();

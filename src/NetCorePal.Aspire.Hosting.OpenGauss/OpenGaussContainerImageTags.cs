@@ -8,8 +8,7 @@ internal static class OpenGaussContainerImageTags
     /// <remarks>opengauss/opengauss</remarks>
     public const string Image = "opengauss/opengauss";
 
-    /// <remarks>6.0.0</remarks>
-
+    /// <remarks>latest</remarks>
     public const string Tag = "latest";
 
     /// <remarks>docker.io</remarks>

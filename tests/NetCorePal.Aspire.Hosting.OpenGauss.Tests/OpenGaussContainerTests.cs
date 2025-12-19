@@ -11,8 +11,7 @@ namespace NetCorePal.Aspire.Hosting.OpenGauss.Tests;
 /// 
 /// To run these tests:
 /// 1. Ensure Docker is installed and running
-/// 2. Remove the Skip attribute from the test methods
-/// 3. Run: dotnet test --filter "FullyQualifiedName~OpenGaussContainerTests"
+/// 2. Run: dotnet test --filter "FullyQualifiedName~OpenGaussContainerTests"
 /// </summary>
 public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
 {
@@ -23,7 +22,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         _fixture = fixture;
     }
 
-    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    [RequiresDockerFact]
     public async Task ConnectionStateReturnsOpen()
     {
         // Arrange
@@ -44,7 +43,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         Assert.Equal(1, Convert.ToInt32(result));
     }
 
-    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    [RequiresDockerFact]
     public async Task CanExecuteSimpleQuery()
     {
         // Arrange
@@ -62,7 +61,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         Assert.Equal(1, Convert.ToInt32(result));
     }
 
-    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    [RequiresDockerFact]
     public async Task CanCreateTableAndInsertData()
     {
         // Arrange
@@ -102,7 +101,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         await dropCommand.ExecuteNonQueryAsync();
     }
 
-    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    [RequiresDockerFact]
     public async Task CanExecuteVersionQuery()
     {
         // Arrange
@@ -125,7 +124,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
             $"Expected version string to contain 'openGauss' or 'PostgreSQL', but got: {versionString}");
     }
 
-    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    [RequiresDockerFact]
     public async Task DatabaseResourceIncludesDatabaseName()
     {
         // Arrange
@@ -148,7 +147,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         Assert.Equal("testdb", result.ToString());
     }
     
-    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    [RequiresDockerFact]
     public async Task CanExecuteMultipleQueriesOnSameConnection()
     {
         // Arrange
@@ -167,7 +166,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         }
     }
     
-    [Fact(Skip = "Requires Docker - Remove Skip to run with Docker")]
+    [RequiresDockerFact]
     public async Task ConnectionPoolingWorks()
     {
         // Arrange
@@ -197,8 +196,8 @@ public class OpenGaussFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Skip initialization if Docker tests are disabled
-        if (!IsDockerEnabled())
+        // Skip initialization if Docker/Aspire orchestration is unavailable
+        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
         {
             return;
         }
@@ -211,8 +210,9 @@ public class OpenGaussFixture : IAsyncLifetime
         _app = builder.Build();
         await _app.StartAsync();
 
-        // Give the container time to fully start
-        await Task.Delay(TimeSpan.FromSeconds(10));
+        // Wait for the database resource to become healthy instead of sleeping.
+        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        await _app.ResourceNotifications.WaitForResourceHealthyAsync(_openGaussDatabase.Resource.Name, cts.Token);
     }
 
     public async Task DisposeAsync()
@@ -226,11 +226,11 @@ public class OpenGaussFixture : IAsyncLifetime
 
     public async Task<string> GetConnectionStringAsync()
     {
-        if (!IsDockerEnabled())
+        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
         {
             throw new InvalidOperationException(
-                "Docker integration tests are disabled. " +
-                "Remove the Skip attribute from tests or ensure Docker is running.");
+                "Container integration tests are disabled or unavailable. " +
+                "Ensure Docker is installed/running and Aspire orchestration is configured.");
         }
 
         if (_openGaussServer?.Resource is null)
@@ -250,11 +250,11 @@ public class OpenGaussFixture : IAsyncLifetime
 
     public async Task<string> GetDatabaseConnectionStringAsync()
     {
-        if (!IsDockerEnabled())
+        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
         {
             throw new InvalidOperationException(
-                "Docker integration tests are disabled. " +
-                "Remove the Skip attribute from tests or ensure Docker is running.");
+                "Container integration tests are disabled or unavailable. " +
+                "Ensure Docker is installed/running and Aspire orchestration is configured.");
         }
 
         if (_openGaussDatabase?.Resource is null)
@@ -272,10 +272,5 @@ public class OpenGaussFixture : IAsyncLifetime
         return connectionString + ";No Reset On Close=true;";
     }
 
-    private static bool IsDockerEnabled()
-    {
-        // Allow tests to be skipped via environment variable
-        return !string.Equals(Environment.GetEnvironmentVariable("SKIP_DOCKER_TESTS"), "1", StringComparison.Ordinal) &&
-               !string.Equals(Environment.GetEnvironmentVariable("RUN_DOCKER_TESTS"), "0", StringComparison.Ordinal);
-    }
+    // Docker detection is centralized in DockerTestEnvironment.
 }

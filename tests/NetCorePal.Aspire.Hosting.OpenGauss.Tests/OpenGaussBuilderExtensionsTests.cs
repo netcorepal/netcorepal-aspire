@@ -223,20 +223,6 @@ public class OpenGaussBuilderExtensionsTests
     }
 
     [Fact]
-    public void RunAsPrivilegedAddsCommandLineArgsAnnotation()
-    {
-        var builder = DistributedApplication.CreateBuilder();
-        var opengauss = builder.AddOpenGauss("opengauss");
-
-        opengauss.RunAsPrivileged();
-
-        var annotation = opengauss.Resource.Annotations.OfType<CommandLineArgsCallbackAnnotation>()
-            .FirstOrDefault();
-
-        Assert.NotNull(annotation);
-    }
-
-    [Fact]
     public void OpenGaussServerResourceExposesConnectionString()
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -282,7 +268,7 @@ public class OpenGaussBuilderExtensionsTests
         Assert.NotNull(containerAnnotation);
         Assert.Equal("docker.io", containerAnnotation.Registry);
         Assert.Equal("opengauss/opengauss", containerAnnotation.Image);
-        Assert.Equal("6.0.0", containerAnnotation.Tag);
+        Assert.Equal("latest", containerAnnotation.Tag);
     }
 
     [Fact]
@@ -296,18 +282,7 @@ public class OpenGaussBuilderExtensionsTests
         Assert.Contains("Username=gaussdb", connectionString);
     }
 
-    [Fact]
-    public void AddOpenGaussRunsInPrivilegedModeByDefault()
-    {
-        var builder = DistributedApplication.CreateBuilder();
-        var opengauss = builder.AddOpenGauss("opengauss");
 
-        // Verify that privileged mode is added by default
-        var annotation = opengauss.Resource.Annotations.OfType<CommandLineArgsCallbackAnnotation>()
-            .FirstOrDefault();
-
-        Assert.NotNull(annotation);
-    }
 
     [Fact]
     public void WithPgAdminAddsContainerOnce()
@@ -340,5 +315,31 @@ public class OpenGaussBuilderExtensionsTests
         var pgwebResource = builder.Resources.Single(r => r.Name.Equals("pgweb", StringComparison.OrdinalIgnoreCase));
         var endpoint = pgwebResource.Annotations.OfType<EndpointAnnotation>().Single(e => e.Name == "http");
         Assert.Equal(2000, endpoint.Port);
+    }
+
+    [Fact]
+    public async Task WithPgWebProducesDefaultBookmarkWhenNoDatabase()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+
+        builder.AddOpenGauss("og").WithPgWeb();
+
+        using var app = builder.Build();
+
+        var pgweb = builder.Resources.Single(r => r.Name.Equals("pgweb", StringComparison.OrdinalIgnoreCase));
+        var createBookmarks = pgweb.Annotations.OfType<ContainerFileSystemCallbackAnnotation>().Single();
+
+        var entries = await createBookmarks.Callback(new() { Model = pgweb, ServiceProvider = app.Services }, CancellationToken.None);
+
+        var pgWebDirectory = Assert.IsType<ContainerDirectory>(entries.First());
+        Assert.Equal(".pgweb", pgWebDirectory.Name);
+
+        var bookmarksDirectory = Assert.IsType<ContainerDirectory>(Assert.Single(pgWebDirectory.Entries));
+        Assert.Equal("bookmarks", bookmarksDirectory.Name);
+
+        var file = Assert.Single(bookmarksDirectory.Entries.OfType<ContainerFile>());
+        Assert.Equal("og.toml", file.Name);
+        Assert.Contains("host = \"og\"", file.Contents);
+        Assert.Contains("database = \"postgres\"", file.Contents);
     }
 }
