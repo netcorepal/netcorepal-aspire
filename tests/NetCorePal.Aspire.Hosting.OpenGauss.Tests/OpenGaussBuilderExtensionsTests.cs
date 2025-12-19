@@ -308,4 +308,37 @@ public class OpenGaussBuilderExtensionsTests
 
         Assert.NotNull(annotation);
     }
+
+    [Fact]
+    public void WithPgAdminAddsContainerOnce()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+
+        builder.AddOpenGauss("og1").WithPgAdmin(pga => pga.WithHostPort(8081));
+        builder.AddOpenGauss("og2").WithPgAdmin(pga => pga.WithHostPort(8082));
+
+        Assert.Single(builder.Resources, r => r.Name.Equals("pgadmin", StringComparison.OrdinalIgnoreCase));
+
+        var container = builder.Resources.Single(r => r.Name.Equals("pgadmin", StringComparison.OrdinalIgnoreCase));
+        var createFile = container.Annotations.OfType<ContainerFileSystemCallbackAnnotation>().Single();
+        Assert.Equal("/pgadmin4", createFile.DestinationPath);
+
+        var endpoint = container.Annotations.OfType<EndpointAnnotation>().Single(e => e.Name == "http");
+        Assert.Equal(8082, endpoint.Port);
+    }
+
+    [Fact]
+    public void WithPgWebAddsContainerOnce()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+
+        builder.AddOpenGauss("og1").WithPgWeb(pgweb => pgweb.WithHostPort(1000));
+        builder.AddOpenGauss("og2").WithPgWeb(pgweb => pgweb.WithHostPort(2000));
+
+        Assert.Single(builder.Resources.OfType<global::Aspire.Hosting.OpenGauss.PgWebContainerResource>());
+
+        var pgwebResource = builder.Resources.Single(r => r.Name.Equals("pgweb", StringComparison.OrdinalIgnoreCase));
+        var endpoint = pgwebResource.Annotations.OfType<EndpointAnnotation>().Single(e => e.Name == "http");
+        Assert.Equal(2000, endpoint.Port);
+    }
 }

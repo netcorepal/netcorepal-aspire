@@ -1,5 +1,9 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.OpenGauss;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using System.Text;
+using System.Text.Json;
 
 namespace Aspire.Hosting;
 
@@ -9,6 +13,7 @@ namespace Aspire.Hosting;
 public static class OpenGaussBuilderExtensions
 {
     private const int OpenGaussPortDefault = 5432;
+    private const string DefaultOpenGaussUserName = "gaussdb";
 
     /// <summary>
     /// Adds an OpenGauss resource to the application model. A container is used for local development.
@@ -53,6 +58,250 @@ public static class OpenGaussBuilderExtensions
             .WithEnvironment("GS_PASSWORD", openGaussServer.PasswordParameter)
             .WithEnvironment("PGPASSWORD", openGaussServer.PasswordParameter) // OpenGauss is PostgreSQL-compatible and uses PGPASSWORD for client authentication
             .PublishAsContainer();
+    }
+
+    /// <summary>
+    /// Adds a pgAdmin 4 administration and development platform for OpenGauss/PostgreSQL-compatible servers to the application model.
+    /// </summary>
+    /// <remarks>
+    /// This version of the package defaults to the <c>9.9.0</c> tag of the <c>dpage/pgadmin4</c> container image.
+    /// </remarks>
+    /// <param name="builder">The OpenGauss server resource builder.</param>
+    /// <param name="configureContainer">Callback to configure pgAdmin container resource.</param>
+    /// <param name="containerName">The name of the container (Optional). Defaults to <c>pgadmin</c>.</param>
+    /// <returns>A reference to the <see cref="IResourceBuilder{T}"/>.</returns>
+    public static IResourceBuilder<T> WithPgAdmin<T>(
+        this IResourceBuilder<T> builder,
+        Action<IResourceBuilder<PgAdminContainerResource>>? configureContainer = null,
+        string? containerName = null)
+        where T : OpenGaussServerResource
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (builder.ApplicationBuilder.Resources.OfType<PgAdminContainerResource>().SingleOrDefault() is { } existingPgAdminResource)
+        {
+            var builderForExistingResource = builder.ApplicationBuilder.CreateResourceBuilder(existingPgAdminResource);
+            configureContainer?.Invoke(builderForExistingResource);
+            return builder;
+        }
+
+        containerName ??= "pgadmin";
+
+        var pgAdminContainer = new PgAdminContainerResource(containerName);
+        var pgAdminContainerBuilder = builder.ApplicationBuilder.AddResource(pgAdminContainer)
+            .WithImage(OpenGaussContainerImageTags.PgAdminImage, OpenGaussContainerImageTags.PgAdminTag)
+            .WithImageRegistry(OpenGaussContainerImageTags.PgAdminRegistry)
+            .WithHttpEndpoint(targetPort: 80, name: "http")
+            .WithEnvironment(SetPgAdminEnvironmentVariables)
+            .WithHttpHealthCheck("/browser")
+            .ExcludeFromManifest();
+
+        pgAdminContainerBuilder.WithContainerFiles(
+            destinationPath: "/pgadmin4",
+            callback: async (context, cancellationToken) =>
+            {
+                var openGaussInstances = builder.ApplicationBuilder.Resources.OfType<OpenGaussServerResource>();
+
+                return [
+                    new ContainerFile
+                    {
+                        Name = "servers.json",
+                        Contents = await WritePgAdminServerJson(openGaussInstances, cancellationToken).ConfigureAwait(false),
+                    },
+                ];
+            });
+
+        configureContainer?.Invoke(pgAdminContainerBuilder);
+        pgAdminContainerBuilder.WithRelationship(builder.Resource, "PgAdmin");
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Configures the host port that the pgAdmin resource is exposed on instead of using randomly assigned port.
+    /// </summary>
+    /// <param name="builder">The resource builder for pgAdmin.</param>
+    /// <param name="port">The port to bind on the host. If <see langword="null"/> is used random port will be assigned.</param>
+    /// <returns>The resource builder for pgAdmin.</returns>
+    public static IResourceBuilder<PgAdminContainerResource> WithHostPort(this IResourceBuilder<PgAdminContainerResource> builder, int? port)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithEndpoint("http", endpoint =>
+        {
+            endpoint.Port = port;
+        });
+    }
+
+    /// <summary>
+    /// Adds an administration and development platform for OpenGauss/PostgreSQL-compatible databases to the application model using pgweb.
+    /// </summary>
+    /// <remarks>
+    /// This version of the package defaults to the <c>0.16.2</c> tag of the <c>sosedoff/pgweb</c> container image.
+    /// </remarks>
+    /// <param name="builder">The OpenGauss server resource builder.</param>
+    /// <param name="configureContainer">Configuration callback for pgweb container resource.</param>
+    /// <param name="containerName">The name of the container (Optional). Defaults to <c>pgweb</c>.</param>
+    /// <returns>A reference to the <see cref="IResourceBuilder{OpenGaussServerResource}"/>.</returns>
+    public static IResourceBuilder<OpenGaussServerResource> WithPgWeb(
+        this IResourceBuilder<OpenGaussServerResource> builder,
+        Action<IResourceBuilder<PgWebContainerResource>>? configureContainer = null,
+        string? containerName = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (builder.ApplicationBuilder.Resources.OfType<PgWebContainerResource>().SingleOrDefault() is { } existingPgWebResource)
+        {
+            var builderForExistingResource = builder.ApplicationBuilder.CreateResourceBuilder(existingPgWebResource);
+            configureContainer?.Invoke(builderForExistingResource);
+            return builder;
+        }
+
+        containerName ??= "pgweb";
+
+        var pgwebContainer = new PgWebContainerResource(containerName);
+        var pgwebContainerBuilder = builder.ApplicationBuilder.AddResource(pgwebContainer)
+            .WithImage(OpenGaussContainerImageTags.PgWebImage, OpenGaussContainerImageTags.PgWebTag)
+            .WithImageRegistry(OpenGaussContainerImageTags.PgWebRegistry)
+            .WithHttpEndpoint(targetPort: 8081, name: "http")
+            .WithArgs("--bookmarks-dir=/.pgweb/bookmarks")
+            .WithArgs("--sessions")
+            .ExcludeFromManifest();
+
+        configureContainer?.Invoke(pgwebContainerBuilder);
+        pgwebContainerBuilder.WithRelationship(builder.Resource, "PgWeb");
+        pgwebContainerBuilder.WithHttpHealthCheck();
+
+        pgwebContainerBuilder.WithContainerFiles(
+            destinationPath: "/",
+            callback: async (_, ct) =>
+            {
+                var databases = builder.ApplicationBuilder.Resources.OfType<OpenGaussDatabaseResource>();
+
+                return [
+                    new ContainerDirectory
+                    {
+                        Name = ".pgweb",
+                        Entries = [
+                            new ContainerDirectory
+                            {
+                                Name = "bookmarks",
+                                Entries = await WritePgWebBookmarks(databases, ct).ConfigureAwait(false)
+                            },
+                        ],
+                    },
+                ];
+            });
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Configures the host port that the pgweb resource is exposed on instead of using randomly assigned port.
+    /// </summary>
+    /// <param name="builder">The resource builder for pgweb.</param>
+    /// <param name="port">The port to bind on the host. If <see langword="null"/> is used random port will be assigned.</param>
+    /// <returns>The resource builder for pgweb.</returns>
+    public static IResourceBuilder<PgWebContainerResource> WithHostPort(this IResourceBuilder<PgWebContainerResource> builder, int? port)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        return builder.WithEndpoint("http", endpoint =>
+        {
+            endpoint.Port = port;
+        });
+    }
+
+    private static async Task<IEnumerable<ContainerFileSystemItem>> WritePgWebBookmarks(
+        IEnumerable<OpenGaussDatabaseResource> openGaussDatabases,
+        CancellationToken cancellationToken)
+    {
+        var bookmarkFiles = new List<ContainerFileSystemItem>();
+
+        foreach (var openGaussDatabase in openGaussDatabases)
+        {
+            var user = openGaussDatabase.Parent.UserNameParameter is null
+                ? DefaultOpenGaussUserName
+                : await openGaussDatabase.Parent.UserNameParameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+
+            var password = await openGaussDatabase.Parent.PasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false) ?? "password";
+
+            // pgweb assumes OpenGauss is being accessed over a default Aspire container network and hardcodes the resource address.
+            var fileContent = $"""
+                    host = \"{openGaussDatabase.Parent.Name}\"
+                    port = {openGaussDatabase.Parent.PrimaryEndpoint.TargetPort}
+                    user = \"{user}\"
+                    password = \"{password}\"
+                    database = \"{openGaussDatabase.DatabaseName}\"
+                    sslmode = \"disable\"
+                    """;
+
+            bookmarkFiles.Add(new ContainerFile
+            {
+                Name = $"{openGaussDatabase.Name}.toml",
+                Contents = fileContent,
+            });
+        }
+
+        return bookmarkFiles;
+    }
+
+    private static async Task<string> WritePgAdminServerJson(
+        IEnumerable<OpenGaussServerResource> openGaussServers,
+        CancellationToken cancellationToken)
+    {
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+
+        writer.WriteStartObject();
+        writer.WriteStartObject("Servers");
+
+        var serverIndex = 1;
+        foreach (var openGaussServer in openGaussServers)
+        {
+            var endpoint = openGaussServer.PrimaryEndpoint;
+            var userName = openGaussServer.UserNameParameter is null
+                ? DefaultOpenGaussUserName
+                : await openGaussServer.UserNameParameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+
+            var password = await openGaussServer.PasswordParameter.GetValueAsync(cancellationToken).ConfigureAwait(false);
+
+            writer.WriteStartObject($"{serverIndex}");
+            writer.WriteString("Name", openGaussServer.Name);
+            writer.WriteString("Group", "Servers");
+
+            // pgAdmin assumes OpenGauss is being accessed over a default Aspire container network and hardcodes the resource address.
+            writer.WriteString("Host", endpoint.Resource.Name);
+            writer.WriteNumber("Port", (int)endpoint.TargetPort!);
+            writer.WriteString("Username", userName);
+            writer.WriteString("SSLMode", "prefer");
+            writer.WriteString("MaintenanceDB", "postgres");
+            writer.WriteString("PasswordExecCommand", $"echo '{password}'");
+            writer.WriteEndObject();
+
+            serverIndex++;
+        }
+
+        writer.WriteEndObject();
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void SetPgAdminEnvironmentVariables(EnvironmentCallbackContext context)
+    {
+        context.EnvironmentVariables["PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED"] = "False";
+        context.EnvironmentVariables["PGADMIN_CONFIG_SERVER_MODE"] = "False";
+        context.EnvironmentVariables["PGADMIN_DEFAULT_EMAIL"] = "admin@domain.com";
+        context.EnvironmentVariables["PGADMIN_DEFAULT_PASSWORD"] = "admin";
+
+        var config = context.ExecutionContext.ServiceProvider.GetRequiredService<IConfiguration>();
+        if (context.ExecutionContext.IsRunMode && config.GetValue<bool>("CODESPACES", false))
+        {
+            context.EnvironmentVariables["PGADMIN_CONFIG_PROXY_X_HOST_COUNT"] = "1";
+            context.EnvironmentVariables["PGADMIN_CONFIG_PROXY_X_PREFIX_COUNT"] = "1";
+        }
     }
 
     /// <summary>
