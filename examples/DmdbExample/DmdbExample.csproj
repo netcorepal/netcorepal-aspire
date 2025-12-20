@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Aspire.AppHost.Sdk/13.1.0">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -12,7 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\NetCorePal.Aspire.Hosting.DMDB\NetCorePal.Aspire.Hosting.DMDB.csproj" />
+    <ProjectReference Include="..\..\src\NetCorePal.Aspire.Hosting.DMDB\NetCorePal.Aspire.Hosting.DMDB.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
 
 </Project>

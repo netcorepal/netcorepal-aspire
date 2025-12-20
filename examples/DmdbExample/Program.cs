@@ -21,6 +21,4 @@ var customDmdb = builder.AddDmdb("dmdb-custom")
 var customDatabase = customDmdb.AddDatabase("mydb");
 
 // Uncomment the following line to actually run the application
-// builder.Build().Run();
-
-Console.WriteLine("DMDB example setup complete. Uncomment the last line to run the application.");
+builder.Build().Run();
