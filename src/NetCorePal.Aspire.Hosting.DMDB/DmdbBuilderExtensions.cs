@@ -263,6 +263,35 @@ public static class DmdbBuilderExtensions
                 await using var command = connection.CreateCommand();
                 command.CommandText = "SELECT 1;";
                 var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+                // Parse the connection string to extract host and port
+                // Connection string format: "Server=host:port;User Id=username;Password=password;Database=database"
+                var parts = connectionString.Split(';');
+                string? host = null;
+                int port = DmdbPortDefault;
+
+                foreach (var part in parts)
+                {
+                    var trimmedPart = part.Trim();
+                    if (trimmedPart.StartsWith("Server=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var serverValue = trimmedPart["Server=".Length..];
+                        // Handle IPv6 addresses by finding the last colon for port separator
+                        var lastColonIndex = serverValue.LastIndexOf(':');
+                        if (lastColonIndex > 0)
+                        {
+                            host = serverValue[..lastColonIndex];
+                            if (int.TryParse(serverValue[(lastColonIndex + 1)..], out var parsedPort))
+                            {
+                                port = parsedPort;
+                            }
+                        }
+                        else
+                        {
+                            host = serverValue;
+                        }
+                        break;
+                    }
+                }
 
                 return result is null
                     ? HealthCheckResult.Unhealthy("OpenGauss ping returned null.")
