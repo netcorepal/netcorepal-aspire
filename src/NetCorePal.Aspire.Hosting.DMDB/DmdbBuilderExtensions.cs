@@ -259,7 +259,7 @@ public static class DmdbBuilderExtensions
             try
             {
                 // Parse the connection string to extract host and port
-                // Connection string format: "Server=host:port;User Id=username;******;Database=database"
+                // Connection string format: "Server=host:port;User Id=username;Password=password;Database=database"
                 var parts = connectionString.Split(';');
                 string? host = null;
                 int port = DmdbPortDefault;
@@ -269,12 +269,20 @@ public static class DmdbBuilderExtensions
                     var trimmedPart = part.Trim();
                     if (trimmedPart.StartsWith("Server=", StringComparison.OrdinalIgnoreCase))
                     {
-                        var serverValue = trimmedPart.Substring("Server=".Length);
-                        var hostPort = serverValue.Split(':');
-                        host = hostPort[0];
-                        if (hostPort.Length > 1 && int.TryParse(hostPort[1], out var parsedPort))
+                        var serverValue = trimmedPart["Server=".Length..];
+                        // Handle IPv6 addresses by finding the last colon for port separator
+                        var lastColonIndex = serverValue.LastIndexOf(':');
+                        if (lastColonIndex > 0)
                         {
-                            port = parsedPort;
+                            host = serverValue[..lastColonIndex];
+                            if (int.TryParse(serverValue[(lastColonIndex + 1)..], out var parsedPort))
+                            {
+                                port = parsedPort;
+                            }
+                        }
+                        else
+                        {
+                            host = serverValue;
                         }
                         break;
                     }
