@@ -59,6 +59,31 @@ public class DmdbBuilderExtensionsTests
     }
 
     [Fact]
+    public void AddDmdbAddsHealthCheckAnnotation()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+
+        var annotation = dmdb.Resource.Annotations.OfType<HealthCheckAnnotation>().FirstOrDefault();
+
+        Assert.NotNull(annotation);
+        Assert.False(string.IsNullOrWhiteSpace(annotation!.Key));
+    }
+
+    [Fact]
+    public void AddDatabaseAddsHealthCheckAnnotation()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+        var database = dmdb.AddDatabase("mydb");
+
+        var annotation = database.Resource.Annotations.OfType<HealthCheckAnnotation>().FirstOrDefault();
+
+        Assert.NotNull(annotation);
+        Assert.False(string.IsNullOrWhiteSpace(annotation!.Key));
+    }
+
+    [Fact]
     public void AddDmdbWithPortSetsHostPort()
     {
         var builder = DistributedApplication.CreateBuilder();

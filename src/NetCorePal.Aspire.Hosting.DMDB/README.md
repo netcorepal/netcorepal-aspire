@@ -45,6 +45,19 @@ var dmdb = builder.AddDmdb("dmdb")
 var database = dmdb.AddDatabase("mydb");
 ```
 
+### Using with WaitFor
+
+The DMDB resources include built-in health checks. When a resource is referenced as a dependency using the `WaitFor` extension method, the dependent resource will wait until the DMDB resource is able to service requests:
+
+```csharp
+var dmdb = builder.AddDmdb("dmdb");
+var database = dmdb.AddDatabase("mydb");
+
+// API will wait for the database to be ready before starting
+var api = builder.AddProject<Projects.MyApi>("api")
+    .WaitFor(database);
+```
+
 ## Features
 
 - **Container-based deployment**: Uses the `cnxc/dm8` Docker image
@@ -52,6 +65,7 @@ var database = dmdb.AddDatabase("mydb");
 - **Volume support**: Persist data using volumes or bind mounts
 - **Custom port mapping**: Configure host port for DMDB access
 - **Database management**: Easy creation of multiple databases
+- **Health checks**: Built-in health checks for both server and database resources
 
 ## Default Configuration
 

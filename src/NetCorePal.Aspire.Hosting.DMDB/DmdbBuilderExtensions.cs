@@ -1,5 +1,8 @@
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Dmdb;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using System.Net.Sockets;
 
 namespace Aspire.Hosting;
 
@@ -23,6 +26,12 @@ public static class DmdbBuilderExtensions
     /// <param name="port">The host port used when launching the container. If null a random port will be assigned.</param>
     /// <returns>A reference to the <see cref="IResourceBuilder{DmdbServerResource}"/>.</returns>
     /// <remarks>
+    /// <para>
+    /// This resource includes built-in health checks. When this resource is referenced as a dependency
+    /// using the <see cref="ResourceBuilderExtensions.WaitFor{T}(IResourceBuilder{T}, IResourceBuilder{IResource})"/>
+    /// extension method then the dependent resource will wait until the DMDB resource is able to service
+    /// requests.
+    /// </para>
     /// This version of the package defaults to the <c>20250423-kylin</c> tag of the <c>cnxc/dm8</c> container image.
     /// </remarks>
     public static IResourceBuilder<DmdbServerResource> AddDmdb(
@@ -46,6 +55,14 @@ public static class DmdbBuilderExtensions
 
         var dmdbServer = new DmdbServerResource(name, userName?.Resource, passwordParameter, dbaPasswordParameter);
 
+        // Register a health check that can be associated with the resource so dependent resources can WaitFor() it.
+        var serverHealthCheckKey = $"{name}-dmdb";
+        builder.Services.AddHealthChecks().AddCheck(
+            serverHealthCheckKey,
+            new DmdbConnectionHealthCheck(
+                ct => dmdbServer.ConnectionStringExpression.GetValueAsync(ct),
+                DefaultDatabaseName));
+
         return builder.AddResource(dmdbServer)
             .WithContainerRuntimeArgs("--privileged")
             .WithEndpoint(port: port, targetPort: DmdbPortDefault,
@@ -55,6 +72,7 @@ public static class DmdbBuilderExtensions
             .WithEnvironment("DM_USER_PWD", dmdbServer.PasswordParameter)
             .WithEnvironment("SYSDBA_PWD", dmdbServer.DbaPasswordParameter)
             .WithEnvironment("SYSAUDITOR_PWD", dmdbServer.DbaPasswordParameter)
+            .WithHealthCheck(serverHealthCheckKey)
             .PublishAsContainer();
     }
 
@@ -65,6 +83,13 @@ public static class DmdbBuilderExtensions
     /// <param name="name">The name of the resource. This name will be used as the connection string name when referenced in a dependency.</param>
     /// <param name="databaseName">The name of the database. If not provided, this defaults to the same value as <paramref name="name"/>.</param>
     /// <returns>A reference to the <see cref="IResourceBuilder{DmdbDatabaseResource}"/>.</returns>
+    /// <remarks>
+    /// <para>
+    /// This resource includes built-in health checks. When this resource is referenced as a dependency
+    /// using the <see cref="ResourceBuilderExtensions.WaitFor{T}(IResourceBuilder{T}, IResourceBuilder{IResource})"/>
+    /// extension method then the dependent resource will wait until the DMDB database is available.
+    /// </para>
+    /// </remarks>
     public static IResourceBuilder<DmdbDatabaseResource> AddDatabase(
         this IResourceBuilder<DmdbServerResource> builder,
         string name,
@@ -79,7 +104,15 @@ public static class DmdbBuilderExtensions
         builder.Resource.Databases.TryAdd(name, databaseName);
         var dmdbDatabase = new DmdbDatabaseResource(name, databaseName, builder.Resource);
 
-        return builder.ApplicationBuilder.AddResource(dmdbDatabase);
+        var databaseHealthCheckKey = $"{builder.Resource.Name}-{name}-dmdbdb";
+        builder.ApplicationBuilder.Services.AddHealthChecks().AddCheck(
+            databaseHealthCheckKey,
+            new DmdbConnectionHealthCheck(
+                ct => dmdbDatabase.ConnectionStringExpression.GetValueAsync(ct),
+                databaseName));
+
+        return builder.ApplicationBuilder.AddResource(dmdbDatabase)
+            .WithHealthCheck(databaseHealthCheckKey);
     }
 
     /// <summary>
@@ -184,5 +217,89 @@ public static class DmdbBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
 
         return builder.WithEndpoint(DmdbServerResource.PrimaryEndpointName, endpoint => { endpoint.Port = port; });
+    }
+
+    private sealed class DmdbConnectionHealthCheck : IHealthCheck
+    {
+        private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(3);
+
+        private readonly Func<CancellationToken, ValueTask<string?>> _getConnectionString;
+        private readonly string _databaseName;
+
+        public DmdbConnectionHealthCheck(Func<CancellationToken, ValueTask<string?>> getConnectionString, string databaseName)
+        {
+            _getConnectionString = getConnectionString;
+            _databaseName = databaseName;
+        }
+
+        public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+        {
+            string? connectionString;
+            try
+            {
+                connectionString = await _getConnectionString(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return HealthCheckResult.Unhealthy("Failed to resolve DMDB connection string.", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return HealthCheckResult.Unhealthy("DMDB connection string is empty.");
+            }
+
+            // If the value provider hasn't resolved yet, the connection string may still contain
+            // Aspire manifest placeholders like "{resource.bindings.tcp.host}".
+            if (connectionString.Contains(".bindings.", StringComparison.Ordinal))
+            {
+                return HealthCheckResult.Unhealthy("DMDB connection string is not resolved yet.");
+            }
+
+            try
+            {
+                // Parse the connection string to extract host and port
+                // Connection string format: "Server=host:port;User Id=username;******;Database=database"
+                var parts = connectionString.Split(';');
+                string? host = null;
+                int port = DmdbPortDefault;
+
+                foreach (var part in parts)
+                {
+                    var trimmedPart = part.Trim();
+                    if (trimmedPart.StartsWith("Server=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var serverValue = trimmedPart.Substring("Server=".Length);
+                        var hostPort = serverValue.Split(':');
+                        host = hostPort[0];
+                        if (hostPort.Length > 1 && int.TryParse(hostPort[1], out var parsedPort))
+                        {
+                            port = parsedPort;
+                        }
+                        break;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(host))
+                {
+                    return HealthCheckResult.Unhealthy("Unable to parse DMDB host from connection string.");
+                }
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(DefaultTimeout);
+
+                // Try to establish a TCP connection to the DMDB server
+                using var tcpClient = new TcpClient();
+                await tcpClient.ConnectAsync(host, port, timeoutCts.Token).ConfigureAwait(false);
+
+                return tcpClient.Connected
+                    ? HealthCheckResult.Healthy()
+                    : HealthCheckResult.Unhealthy("Unable to connect to DMDB server.");
+            }
+            catch (Exception ex)
+            {
+                return HealthCheckResult.Unhealthy("DMDB is not ready.", ex);
+            }
+        }
     }
 }
