@@ -45,15 +45,12 @@ public static class DmdbBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(name);
 
-        var passwordParameter = password?.Resource ??
-                                ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder,
-                                    $"{name}-password");
-
         var dbaPasswordParameter = dbaPassword?.Resource ??
                                    ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder,
-                                       $"{name}-dba-password");
+                                       $"{name}-dba-password", special: false);
 
-        var dmdbServer = new DmdbServerResource(name, userName?.Resource, passwordParameter, dbaPasswordParameter);
+        var dmdbServer = new DmdbServerResource(name, userName?.Resource, dbaPasswordParameter,
+            dbaPasswordParameter);
 
         // Register a health check that can be associated with the resource so dependent resources can WaitFor() it.
         var serverHealthCheckKey = $"{name}-dmdb";
@@ -226,13 +223,15 @@ public static class DmdbBuilderExtensions
         private readonly Func<CancellationToken, ValueTask<string?>> _getConnectionString;
         private readonly string _databaseName;
 
-        public DmdbConnectionHealthCheck(Func<CancellationToken, ValueTask<string?>> getConnectionString, string databaseName)
+        public DmdbConnectionHealthCheck(Func<CancellationToken, ValueTask<string?>> getConnectionString,
+            string databaseName)
         {
             _getConnectionString = getConnectionString;
             _databaseName = databaseName;
         }
 
-        public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+        public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context,
+            CancellationToken cancellationToken = default)
         {
             string? connectionString;
             try
@@ -258,43 +257,16 @@ public static class DmdbBuilderExtensions
 
             try
             {
-                // Parse the connection string to extract host and port
-                // Connection string format: "Server=host:port;User Id=username;******;Database=database"
-                var parts = connectionString.Split(';');
-                string? host = null;
-                int port = DmdbPortDefault;
+                await using var connection = new Dm.DmConnection(connectionString);
+                await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
-                foreach (var part in parts)
-                {
-                    var trimmedPart = part.Trim();
-                    if (trimmedPart.StartsWith("Server=", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var serverValue = trimmedPart.Substring("Server=".Length);
-                        var hostPort = serverValue.Split(':');
-                        host = hostPort[0];
-                        if (hostPort.Length > 1 && int.TryParse(hostPort[1], out var parsedPort))
-                        {
-                            port = parsedPort;
-                        }
-                        break;
-                    }
-                }
+                await using var command = connection.CreateCommand();
+                command.CommandText = "SELECT 1;";
+                var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
 
-                if (string.IsNullOrWhiteSpace(host))
-                {
-                    return HealthCheckResult.Unhealthy("Unable to parse DMDB host from connection string.");
-                }
-
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(DefaultTimeout);
-
-                // Try to establish a TCP connection to the DMDB server
-                using var tcpClient = new TcpClient();
-                await tcpClient.ConnectAsync(host, port, timeoutCts.Token).ConfigureAwait(false);
-
-                return tcpClient.Connected
-                    ? HealthCheckResult.Healthy()
-                    : HealthCheckResult.Unhealthy("Unable to connect to DMDB server.");
+                return result is null
+                    ? HealthCheckResult.Unhealthy("OpenGauss ping returned null.")
+                    : HealthCheckResult.Healthy();
             }
             catch (Exception ex)
             {

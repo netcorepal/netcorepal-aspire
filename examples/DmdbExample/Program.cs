@@ -8,8 +8,8 @@ var dmdb = builder.AddDmdb("dmdb");
 // Add a database
 var database = dmdb.AddDatabase("testdb");
 
-// You can also customize passwords
-var password = builder.AddParameter("user-password", value: "Test@1234", secret: true);
+//You can also customize passwords
+var password = builder.AddParameter("user-password", value: "SYSDBA_abc123", secret: true);
 var dbaPassword = builder.AddParameter("dba-password", value: "SYSDBA_abc123", secret: true);
 
 var customDmdb = builder.AddDmdb("dmdb-custom")

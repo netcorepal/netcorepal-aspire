@@ -20,7 +20,7 @@ public class DmdbDatabaseResource(string name, string databaseName, DmdbServerRe
     /// </summary>
     public ReferenceExpression ConnectionStringExpression =>
         ReferenceExpression.Create(
-            $"Server={Parent.PrimaryEndpoint.Property(EndpointProperty.Host)}:{Parent.PrimaryEndpoint.Property(EndpointProperty.Port)};User Id={Parent.UserNameReference};Password={Parent.PasswordParameter};Database={DatabaseName}");
+            $"Host={Parent.PrimaryEndpoint.Property(EndpointProperty.Host)};Port={Parent.PrimaryEndpoint.Property(EndpointProperty.Port)};Username={Parent.UserNameReference};Password={Parent.PasswordParameter};Database={DatabaseName};DBAPassword={Parent.DbaPasswordParameter};");
 
     /// <summary>
     /// Gets the database name.

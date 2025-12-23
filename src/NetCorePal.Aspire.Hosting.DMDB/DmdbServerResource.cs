@@ -17,7 +17,8 @@ public class DmdbServerResource : ContainerResource, IResourceWithConnectionStri
     /// <param name="password">A parameter that contains the DMDB server password. Must not be null.</param>
     /// <param name="dbaPassword">A parameter that contains the DMDB DBA password. Must not be null.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="password"/> or <paramref name="dbaPassword"/> is null.</exception>
-    public DmdbServerResource(string name, ParameterResource? userName, ParameterResource password, ParameterResource dbaPassword) : base(name)
+    public DmdbServerResource(string name, ParameterResource? userName, ParameterResource password,
+        ParameterResource dbaPassword) : base(name)
     {
         ArgumentNullException.ThrowIfNull(password);
         ArgumentNullException.ThrowIfNull(dbaPassword);
@@ -45,9 +46,9 @@ public class DmdbServerResource : ContainerResource, IResourceWithConnectionStri
     /// Returns the user name parameter if specified, otherwise returns the default user name "SYSDBA".
     /// </remarks>
     internal ReferenceExpression UserNameReference =>
-        UserNameParameter is not null ?
-            ReferenceExpression.Create($"{UserNameParameter}") :
-            ReferenceExpression.Create($"SYSDBA");
+        UserNameParameter is not null
+            ? ReferenceExpression.Create($"{UserNameParameter}")
+            : ReferenceExpression.Create($"SYSDBA");
 
     /// <summary>
     /// Gets or sets the parameter that contains the DMDB server password.
@@ -64,7 +65,7 @@ public class DmdbServerResource : ContainerResource, IResourceWithConnectionStri
     /// </summary>
     public ReferenceExpression ConnectionStringExpression =>
         ReferenceExpression.Create(
-            $"Server={PrimaryEndpoint.Property(EndpointProperty.Host)}:{PrimaryEndpoint.Property(EndpointProperty.Port)};User Id={UserNameReference};Password={PasswordParameter}");
+            $"Host={PrimaryEndpoint.Property(EndpointProperty.Host)};Port={PrimaryEndpoint.Property(EndpointProperty.Port)};Username={UserNameReference};Password={PasswordParameter};DBAPassword={DbaPasswordParameter};");
 
     /// <summary>
     /// Gets the connection string for the DMDB server.
@@ -84,5 +85,6 @@ public class DmdbServerResource : ContainerResource, IResourceWithConnectionStri
     /// <summary>
     /// A dictionary where the key is the resource name and the value is the database name.
     /// </summary>
-    public Dictionary<string, string> Databases { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> Databases { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
