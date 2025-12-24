@@ -1,15 +1,13 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
-using System.Net.Sockets;
+using Dm;
 
 namespace NetCorePal.Aspire.Hosting.DMDB.Tests;
 
 /// <summary>
-/// Integration tests that verify DMDB containers start correctly and accept connections.
+/// Integration tests that verify DMDB containers start correctly and accept SQL commands.
 /// These tests follow the pattern from https://github.com/netcorepal/netcorepal-testcontainers
-/// 
-/// Note: These tests verify TCP connectivity. For full SQL integration tests, a DMDB .NET client library would be required.
 /// 
 /// To run these tests:
 /// 1. Ensure Docker is installed and running
@@ -25,30 +23,103 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
     }
 
     [RequiresDockerFact]
-    public async Task CanConnectToDmdbServerViaTcp()
-    {
-        // Arrange
-        var connectionInfo = await _fixture.GetConnectionInfoAsync();
-        
-        // Act - Try to establish TCP connection
-        using var tcpClient = new TcpClient();
-        await tcpClient.ConnectAsync(connectionInfo.Host, connectionInfo.Port);
-
-        // Assert
-        Assert.True(tcpClient.Connected, "Should be able to connect to DMDB server via TCP");
-    }
-
-    [RequiresDockerFact]
-    public async Task ConnectionStringContainsRequiredComponents()
+    public async Task ConnectionStateReturnsOpen()
     {
         // Arrange
         var connectionString = await _fixture.GetConnectionStringAsync();
+        
+        // Act
+        await using var connection = new DmConnection(connectionString);
+        await connection.OpenAsync();
 
         // Assert
-        Assert.NotNull(connectionString);
-        Assert.Contains("Host=", connectionString);
-        Assert.Contains("Username=", connectionString);
-        Assert.Contains("Password=", connectionString);
+        Assert.Equal(System.Data.ConnectionState.Open, connection.State);
+        
+        // Also verify we can execute a simple query
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1;";
+        var result = await command.ExecuteScalarAsync();
+        Assert.NotNull(result);
+        Assert.Equal(1, Convert.ToInt32(result));
+    }
+
+    [RequiresDockerFact]
+    public async Task CanExecuteSimpleQuery()
+    {
+        // Arrange
+        var connectionString = await _fixture.GetConnectionStringAsync();
+        await using var connection = new DmConnection(connectionString);
+        await connection.OpenAsync();
+
+        // Act
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1;";
+        var result = await command.ExecuteScalarAsync();
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(1, Convert.ToInt32(result));
+    }
+
+    [RequiresDockerFact]
+    public async Task CanCreateTableAndInsertData()
+    {
+        // Arrange
+        var connectionString = await _fixture.GetConnectionStringAsync();
+        await using var connection = new DmConnection(connectionString);
+        await connection.OpenAsync();
+
+        // Act - Create table
+        await using var createCommand = connection.CreateCommand();
+        createCommand.CommandText = @"
+            CREATE TABLE test_table (
+                id INT PRIMARY KEY,
+                name VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )";
+        await createCommand.ExecuteNonQueryAsync();
+
+        // Act - Insert data
+        await using var insertCommand = connection.CreateCommand();
+        insertCommand.CommandText = "INSERT INTO test_table (id, name) VALUES (?, ?)";
+        insertCommand.Parameters.Add(new DmParameter { Value = 1 });
+        insertCommand.Parameters.Add(new DmParameter { Value = "test_data" });
+        await insertCommand.ExecuteNonQueryAsync();
+
+        // Act - Query data
+        await using var selectCommand = connection.CreateCommand();
+        selectCommand.CommandText = "SELECT name FROM test_table WHERE id = ?";
+        selectCommand.Parameters.Add(new DmParameter { Value = 1 });
+        var retrievedName = await selectCommand.ExecuteScalarAsync();
+
+        // Assert
+        Assert.Equal("test_data", retrievedName);
+
+        // Cleanup
+        await using var dropCommand = connection.CreateCommand();
+        dropCommand.CommandText = "DROP TABLE test_table";
+        await dropCommand.ExecuteNonQueryAsync();
+    }
+
+    [RequiresDockerFact]
+    public async Task CanExecuteVersionQuery()
+    {
+        // Arrange
+        var connectionString = await _fixture.GetConnectionStringAsync();
+        await using var connection = new DmConnection(connectionString);
+        await connection.OpenAsync();
+
+        // Act
+        await using var command = connection.CreateCommand();
+        // Use a simple query that returns database version info
+        command.CommandText = "SELECT BANNER FROM V$VERSION WHERE ROWNUM = 1";
+        var version = await command.ExecuteScalarAsync();
+
+        // Assert
+        Assert.NotNull(version);
+        var versionString = version?.ToString() ?? "";
+        // DMDB version string should not be empty
+        Assert.False(string.IsNullOrEmpty(versionString), "Version string should not be empty");
     }
 
     [RequiresDockerFact]
@@ -60,49 +131,58 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         // Assert
         Assert.NotNull(connectionString);
         Assert.Contains("Database=testdb", connectionString);
-    }
 
+        // Act - Verify connection works
+        await using var connection = new DmConnection(connectionString);
+        await connection.OpenAsync();
+        Assert.Equal(System.Data.ConnectionState.Open, connection.State);
+        
+        // Verify we can execute queries on the specific database
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1;";
+        var result = await command.ExecuteScalarAsync();
+        Assert.NotNull(result);
+        Assert.Equal(1, Convert.ToInt32(result));
+    }
+    
     [RequiresDockerFact]
-    public async Task CanEstablishMultipleTcpConnections()
+    public async Task CanExecuteMultipleQueriesOnSameConnection()
     {
         // Arrange
-        var connectionInfo = await _fixture.GetConnectionInfoAsync();
+        var connectionString = await _fixture.GetConnectionStringAsync();
+        await using var connection = new DmConnection(connectionString);
+        await connection.OpenAsync();
 
-        // Act & Assert - Establish multiple connections
-        for (int i = 0; i < 3; i++)
+        // Act & Assert - Execute multiple queries
+        for (int i = 1; i <= 5; i++)
         {
-            using var tcpClient = new TcpClient();
-            await tcpClient.ConnectAsync(connectionInfo.Host, connectionInfo.Port);
-            Assert.True(tcpClient.Connected, $"Connection {i + 1} should succeed");
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT {i};";
+            var result = await command.ExecuteScalarAsync();
+            Assert.NotNull(result);
+            Assert.Equal(i, Convert.ToInt32(result));
         }
     }
-
+    
     [RequiresDockerFact]
-    public async Task ServerResourceStartsSuccessfully()
+    public async Task ConnectionPoolingWorks()
     {
         // Arrange
-        var connectionInfo = await _fixture.GetConnectionInfoAsync();
+        var connectionString = await _fixture.GetConnectionStringAsync();
 
-        // Assert - Verify server resource is initialized
-        Assert.NotNull(connectionInfo);
-        Assert.NotNull(connectionInfo.Host);
-        Assert.True(connectionInfo.Port > 0);
-        Assert.Equal(5236, connectionInfo.Port); // Default DMDB port
-    }
-
-    [RequiresDockerFact]
-    public async Task HealthCheckPassesWhenDmdbIsReady()
-    {
-        // The fixture waits for the resource to become healthy before tests run
-        // If we reach this point, the health check has passed
-        var connectionInfo = await _fixture.GetConnectionInfoAsync();
-        
-        Assert.NotNull(connectionInfo);
-        
-        // Verify we can connect
-        using var tcpClient = new TcpClient();
-        await tcpClient.ConnectAsync(connectionInfo.Host, connectionInfo.Port);
-        Assert.True(tcpClient.Connected);
+        // Act - Open and close multiple connections
+        for (int i = 0; i < 3; i++)
+        {
+            await using var connection = new DmConnection(connectionString);
+            await connection.OpenAsync();
+            
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1;";
+            var result = await command.ExecuteScalarAsync();
+            
+            Assert.NotNull(result);
+            Assert.Equal(1, Convert.ToInt32(result));
+        }
     }
 }
 
@@ -128,9 +208,8 @@ public class DmdbFixture : IAsyncLifetime
         _app = builder.Build();
         await _app.StartAsync();
 
-        // Wait for the database resource to become healthy
-        // DMDB containers may take longer to start than PostgreSQL-based databases due to initialization overhead
-        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        // Wait for the database resource to become healthy instead of sleeping.
+        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         await _app.ResourceNotifications.WaitForResourceHealthyAsync(_dmdbDatabase.Resource.Name, cts.Token);
     }
 
@@ -189,51 +268,5 @@ public class DmdbFixture : IAsyncLifetime
         return connectionString;
     }
 
-    public async Task<DmdbConnectionInfo> GetConnectionInfoAsync()
-    {
-        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
-        {
-            throw new InvalidOperationException(
-                "Container integration tests are disabled or unavailable. " +
-                "Ensure Docker is installed/running and Aspire orchestration is configured.");
-        }
-
-        if (_dmdbServer?.Resource is null)
-        {
-            throw new InvalidOperationException("DMDB server resource is not initialized.");
-        }
-
-        var connectionString = await GetConnectionStringAsync();
-        
-        // Parse connection string to extract host and port
-        // Format: "Host=host;Port=port;Username=username;Password=password;DBAPassword=password"
-        var parts = connectionString.Split(';');
-        string? host = null;
-        int port = 5236; // Default
-
-        foreach (var part in parts)
-        {
-            var trimmedPart = part.Trim();
-            if (trimmedPart.StartsWith("Host=", StringComparison.OrdinalIgnoreCase))
-            {
-                host = trimmedPart["Host=".Length..];
-            }
-            else if (trimmedPart.StartsWith("Port=", StringComparison.OrdinalIgnoreCase))
-            {
-                if (int.TryParse(trimmedPart["Port=".Length..], out var parsedPort))
-                {
-                    port = parsedPort;
-                }
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(host))
-        {
-            throw new InvalidOperationException("Unable to parse host from connection string.");
-        }
-
-        return new DmdbConnectionInfo(host, port);
-    }
+    // Docker detection is centralized in DockerTestEnvironment.
 }
-
-public record DmdbConnectionInfo(string Host, int Port);
