@@ -21,8 +21,17 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
           include-prerelease: true
+
+      - name: Install Aspire SDK
+        run: dotnet workload install aspire
+      
+      - name: Validation of Aspire SDK
+        run: aspire --version
 
       - name: Restore dependencies
         run: dotnet restore

@@ -12,10 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        framework: [ 'net8.0', 'net9.0', 'net10.0' ]
-        package: [ 'Hosting.OpenGauss' ]
+        framework: [ 'net10.0' ]
+        package: [ 'Hosting.OpenGauss', "Hosting.DMDB" ]
 
-    name: Test (${{ matrix.package }} / ${{ matrix.framework }})
+    name: ${{ matrix.package }}-${{ matrix.framework }}
 
     steps:
       - uses: actions/checkout@v4
@@ -23,8 +23,21 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: ${{ matrix.framework == 'net8.0' && '8.0.x' || matrix.framework == 'net9.0' && '9.0.x' || '10.0.x' }}
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
           include-prerelease: true
+
+      - name: Install Aspire CLI
+        run: |
+          curl -sSL https://aspire.dev/install.sh | bash
+          echo "export PATH=\"$HOME/.aspire/bin:$PATH\"" >> $GITHUB_ENV
+
+      - name: Validation of Aspire CLI
+        run: |
+          export PATH="$HOME/.aspire/bin:$PATH"
+          aspire --version
 
       - name: Restore dependencies
         run: dotnet restore
