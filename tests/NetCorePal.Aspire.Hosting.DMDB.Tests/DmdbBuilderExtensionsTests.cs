@@ -104,9 +104,8 @@ public class DmdbBuilderExtensionsTests
 
         var dmdb = builder.AddDmdb("dmdb");
 
-        var envAnnotations = dmdb.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>();
-
-        Assert.NotEmpty(envAnnotations);
+        var config = dmdb.Resource.Annotations.OfType<EnvironmentCallbackAnnotation>();
+        Assert.NotEmpty(config);
     }
 
     [Fact]
@@ -122,7 +121,7 @@ public class DmdbBuilderExtensionsTests
     }
 
     [Fact]
-    public void AddDatabaseAddsResourceWithCorrectName()
+    public void AddDatabaseAddsChildDatabaseResource()
     {
         var builder = DistributedApplication.CreateBuilder();
         var dmdb = builder.AddDmdb("dmdb");
@@ -131,12 +130,13 @@ public class DmdbBuilderExtensionsTests
 
         Assert.NotNull(database);
         Assert.Equal("mydb", database.Resource.Name);
-        Assert.IsType<DmdbDatabaseResource>(database.Resource);
         Assert.Equal("mydb", database.Resource.DatabaseName);
+        Assert.IsType<DmdbDatabaseResource>(database.Resource);
+        Assert.Same(dmdb.Resource, database.Resource.Parent);
     }
 
     [Fact]
-    public void AddDatabaseWithCustomDatabaseName()
+    public void AddDatabaseWithCustomNameUsesProvidedDatabaseName()
     {
         var builder = DistributedApplication.CreateBuilder();
         var dmdb = builder.AddDmdb("dmdb");
@@ -148,7 +148,7 @@ public class DmdbBuilderExtensionsTests
     }
 
     [Fact]
-    public void AddDatabaseAddsToParentResourceDatabases()
+    public void AddDatabaseAddsToDatabaseDictionary()
     {
         var builder = DistributedApplication.CreateBuilder();
         var dmdb = builder.AddDmdb("dmdb");
@@ -160,58 +160,6 @@ public class DmdbBuilderExtensionsTests
     }
 
     [Fact]
-    public void WithPasswordSetsPasswordParameter()
-    {
-        var builder = DistributedApplication.CreateBuilder();
-        var password = builder.AddParameter("custom-password", secret: true);
-        var dmdb = builder.AddDmdb("dmdb");
-
-        dmdb.WithPassword(password);
-
-        Assert.Equal("custom-password", dmdb.Resource.PasswordParameter.Name);
-    }
-
-    [Fact]
-    public void WithDbaPasswordSetsDbaPasswordParameter()
-    {
-        var builder = DistributedApplication.CreateBuilder();
-        var dbaPassword = builder.AddParameter("custom-dba-password", secret: true);
-        var dmdb = builder.AddDmdb("dmdb");
-
-        dmdb.WithDbaPassword(dbaPassword);
-
-        Assert.Equal("custom-dba-password", dmdb.Resource.DbaPasswordParameter.Name);
-    }
-
-    [Fact]
-    public void WithUserNameSetsUserNameParameter()
-    {
-        var builder = DistributedApplication.CreateBuilder();
-        var userName = builder.AddParameter("custom-user");
-        var dmdb = builder.AddDmdb("dmdb");
-
-        dmdb.WithUserName(userName);
-
-        Assert.NotNull(dmdb.Resource.UserNameParameter);
-        Assert.Equal("custom-user", dmdb.Resource.UserNameParameter.Name);
-    }
-
-    [Fact]
-    public void WithHostPortSetsPort()
-    {
-        var builder = DistributedApplication.CreateBuilder();
-        var dmdb = builder.AddDmdb("dmdb");
-
-        dmdb.WithHostPort(5238);
-
-        var endpoint = dmdb.Resource.Annotations.OfType<EndpointAnnotation>()
-            .FirstOrDefault(e => e.Name == "tcp");
-
-        Assert.NotNull(endpoint);
-        Assert.Equal(5238, endpoint.Port);
-    }
-
-    [Fact]
     public void WithDataVolumeAddsVolumeAnnotation()
     {
         var builder = DistributedApplication.CreateBuilder();
@@ -219,10 +167,28 @@ public class DmdbBuilderExtensionsTests
 
         dmdb.WithDataVolume();
 
-        var volumeAnnotation = dmdb.Resource.Annotations.OfType<ContainerMountAnnotation>().FirstOrDefault();
+        var volume = dmdb.Resource.Annotations.OfType<ContainerMountAnnotation>()
+            .FirstOrDefault(m => m.Target == "/opt/dmdbms/data");
 
-        Assert.NotNull(volumeAnnotation);
-        Assert.Equal("/opt/dmdbms/data", volumeAnnotation.Target);
+        Assert.NotNull(volume);
+        Assert.Equal(ContainerMountType.Volume, volume.Type);
+        Assert.Equal("dmdb-data", volume.Source);
+        Assert.False(volume.IsReadOnly);
+    }
+
+    [Fact]
+    public void WithDataVolumeWithCustomNameUsesProvidedName()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+
+        dmdb.WithDataVolume("custom-volume");
+
+        var volume = dmdb.Resource.Annotations.OfType<ContainerMountAnnotation>()
+            .FirstOrDefault(m => m.Target == "/opt/dmdbms/data");
+
+        Assert.NotNull(volume);
+        Assert.Equal("custom-volume", volume.Source);
     }
 
     [Fact]
@@ -231,40 +197,128 @@ public class DmdbBuilderExtensionsTests
         var builder = DistributedApplication.CreateBuilder();
         var dmdb = builder.AddDmdb("dmdb");
 
-        dmdb.WithDataBindMount("/data");
+        dmdb.WithDataBindMount("/my/data/path");
 
-        var mountAnnotation = dmdb.Resource.Annotations.OfType<ContainerMountAnnotation>().FirstOrDefault();
+        var mount = dmdb.Resource.Annotations.OfType<ContainerMountAnnotation>()
+            .FirstOrDefault(m => m.Target == "/opt/dmdbms/data");
 
-        Assert.NotNull(mountAnnotation);
-        Assert.Equal("/opt/dmdbms/data", mountAnnotation.Target);
-        Assert.Equal("/data", mountAnnotation.Source);
+        Assert.NotNull(mount);
+        Assert.Equal(ContainerMountType.BindMount, mount.Type);
+        Assert.Equal("/my/data/path", mount.Source);
+        Assert.False(mount.IsReadOnly);
     }
 
     [Fact]
-    public void ConnectionStringExpressionContainsServerAndPort()
+    public void WithPasswordUpdatesPasswordParameter()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+        var newPassword = builder.AddParameter("new-password", secret: true);
+
+        dmdb.WithPassword(newPassword);
+
+        Assert.Equal("new-password", dmdb.Resource.PasswordParameter.Name);
+    }
+
+    [Fact]
+    public void WithDbaPasswordUpdatesDbaPasswordParameter()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+        var newDbaPassword = builder.AddParameter("new-dba-password", secret: true);
+
+        dmdb.WithDbaPassword(newDbaPassword);
+
+        Assert.Equal("new-dba-password", dmdb.Resource.DbaPasswordParameter.Name);
+    }
+
+    [Fact]
+    public void WithUserNameUpdatesUserNameParameter()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+        var userName = builder.AddParameter("new-user");
+
+        dmdb.WithUserName(userName);
+
+        Assert.NotNull(dmdb.Resource.UserNameParameter);
+        Assert.Equal("new-user", dmdb.Resource.UserNameParameter.Name);
+    }
+
+    [Fact]
+    public void WithHostPortUpdatesEndpointPort()
     {
         var builder = DistributedApplication.CreateBuilder();
         var dmdb = builder.AddDmdb("dmdb");
 
-        var connectionString = dmdb.Resource.ConnectionStringExpression.ValueExpression;
+        dmdb.WithHostPort(6543);
 
-        Assert.Contains("Server=", connectionString);
-        Assert.Contains("User Id=", connectionString);
-        Assert.Contains("Password=", connectionString);
+        var endpoint = dmdb.Resource.Annotations.OfType<EndpointAnnotation>()
+            .FirstOrDefault(e => e.Name == "tcp");
+
+        Assert.NotNull(endpoint);
+        Assert.Equal(6543, endpoint.Port);
     }
 
     [Fact]
-    public void DatabaseConnectionStringExpressionContainsDatabase()
+    public void DmdbServerResourceExposesConnectionString()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+
+        var connectionStringResource = dmdb.Resource as IResourceWithConnectionString;
+
+        Assert.NotNull(connectionStringResource);
+        var connectionString = connectionStringResource.ConnectionStringExpression.ValueExpression;
+        Assert.Contains("Host=", connectionString);
+        Assert.Contains("Port=", connectionString);
+        Assert.Contains("Username=", connectionString);
+        Assert.Contains("Password=", connectionString);
+        Assert.Contains("DBAPassword=", connectionString);
+    }
+
+    [Fact]
+    public void DmdbDatabaseResourceExposesConnectionString()
     {
         var builder = DistributedApplication.CreateBuilder();
         var dmdb = builder.AddDmdb("dmdb");
         var database = dmdb.AddDatabase("mydb");
 
-        var connectionString = database.Resource.ConnectionStringExpression.ValueExpression;
+        var connectionStringResource = database.Resource as IResourceWithConnectionString;
 
-        Assert.Contains("Server=", connectionString);
-        Assert.Contains("User Id=", connectionString);
+        Assert.NotNull(connectionStringResource);
+        var connectionString = connectionStringResource.ConnectionStringExpression.ValueExpression;
+        Assert.Contains("Host=", connectionString);
+        Assert.Contains("Port=", connectionString);
+        Assert.Contains("Username=", connectionString);
         Assert.Contains("Password=", connectionString);
+        Assert.Contains("DBAPassword=", connectionString);
         Assert.Contains("Database=mydb", connectionString);
+    }
+
+    [Fact]
+    public void DmdbUsesCorrectContainerImage()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+
+        var containerAnnotation = dmdb.Resource.Annotations.OfType<ContainerImageAnnotation>()
+            .FirstOrDefault();
+
+        Assert.NotNull(containerAnnotation);
+        Assert.Equal("docker.io", containerAnnotation.Registry);
+        Assert.Equal("cnxc/dm8", containerAnnotation.Image);
+        Assert.Equal("20250423-kylin", containerAnnotation.Tag);
+    }
+
+    [Fact]
+    public void DmdbUsesDefaultUserNameSYSDBA()
+    {
+        var builder = DistributedApplication.CreateBuilder();
+        var dmdb = builder.AddDmdb("dmdb");
+
+        Assert.Null(dmdb.Resource.UserNameParameter);
+        var connectionString = dmdb.Resource.ConnectionStringExpression.ValueExpression;
+        Assert.Contains("Username=SYSDBA", connectionString);
     }
 }

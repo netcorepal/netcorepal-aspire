@@ -45,11 +45,15 @@ public static class DmdbBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(name);
 
+        var passwordParameter = password?.Resource ??
+                                ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder,
+                                    $"{name}-password");
+
         var dbaPasswordParameter = dbaPassword?.Resource ??
                                    ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder,
                                        $"{name}-dba-password", special: false);
 
-        var dmdbServer = new DmdbServerResource(name, userName?.Resource, dbaPasswordParameter,
+        var dmdbServer = new DmdbServerResource(name, userName?.Resource, passwordParameter,
             dbaPasswordParameter);
 
         // Register a health check that can be associated with the resource so dependent resources can WaitFor() it.
