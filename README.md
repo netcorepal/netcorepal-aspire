@@ -15,6 +15,7 @@
 | --- | --- | --- |
 | [NetCorePal.Aspire.Hosting.OpenGauss](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.OpenGauss)（[文档](./src/NetCorePal.Aspire.Hosting.OpenGauss/README.md)） | [![NuGet](https://img.shields.io/nuget/v/NetCorePal.Aspire.Hosting.OpenGauss.svg)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.OpenGauss) | [![NuGet Version](https://img.shields.io/nuget/vpre/NetCorePal.Aspire.Hosting.OpenGauss?label=nuget-pre)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.OpenGauss) |
 | [NetCorePal.Aspire.Hosting.DMDB](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.DMDB)（[文档](./src/NetCorePal.Aspire.Hosting.DMDB/README.md)） | [![NuGet](https://img.shields.io/nuget/v/NetCorePal.Aspire.Hosting.DMDB.svg)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.DMDB) | [![NuGet Version](https://img.shields.io/nuget/vpre/NetCorePal.Aspire.Hosting.DMDB?label=nuget-pre)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.DMDB) |
+| [NetCorePal.Aspire.Hosting.KingbaseES](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.KingbaseES)（[文档](./src/NetCorePal.Aspire.Hosting.KingbaseES/README.md)） | [![NuGet](https://img.shields.io/nuget/v/NetCorePal.Aspire.Hosting.KingbaseES.svg)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.KingbaseES) | [![NuGet Version](https://img.shields.io/nuget/vpre/NetCorePal.Aspire.Hosting.KingbaseES?label=nuget-pre)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.KingbaseES) |
 
 ## 本机快速验证
 
