@@ -26,14 +26,14 @@ jobs:
           dotnet-version: ${{ matrix.framework == 'net8.0' && '8.0.x' || matrix.framework == 'net9.0' && '9.0.x' || '10.0.x' }}
           include-prerelease: true
 
-      - name: Install Aspire SDK
+      - name: Install Aspire CLI
         run: |
           curl -sSL https://aspire.dev/install.sh | bash
-          echo "export PATH=\"$HOME/.dotnet/tools:$PATH\"" >> $GITHUB_ENV
+          echo "export PATH=\"$HOME/.aspire/bin:$PATH\"" >> $GITHUB_ENV
 
-      - name: Validation of Aspire SDK
+      - name: Validation of Aspire CLI
         run: |
-          export PATH="$HOME/.dotnet/tools:$PATH"
+          export PATH="$HOME/.aspire/bin:$PATH"
           aspire --version
 
       - name: Restore dependencies
