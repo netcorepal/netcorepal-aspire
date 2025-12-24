@@ -37,7 +37,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         
         // Also verify we can execute a simple query
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT 1 FROM DUAL";
+        command.CommandText = "SELECT 1;";
         var result = await command.ExecuteScalarAsync();
         Assert.NotNull(result);
         Assert.Equal(1, Convert.ToInt32(result));
@@ -53,7 +53,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
 
         // Act
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT 1 FROM DUAL";
+        command.CommandText = "SELECT 1;";
         var result = await command.ExecuteScalarAsync();
 
         // Assert
@@ -81,15 +81,15 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
 
         // Act - Insert data
         await using var insertCommand = connection.CreateCommand();
-        insertCommand.CommandText = "INSERT INTO test_table (id, name) VALUES (:id, :name)";
-        insertCommand.Parameters.Add(new DmParameter("id", 1));
-        insertCommand.Parameters.Add(new DmParameter("name", "test_data"));
+        insertCommand.CommandText = "INSERT INTO test_table (id, name) VALUES (?, ?)";
+        insertCommand.Parameters.Add(new DmParameter { Value = 1 });
+        insertCommand.Parameters.Add(new DmParameter { Value = "test_data" });
         await insertCommand.ExecuteNonQueryAsync();
 
         // Act - Query data
         await using var selectCommand = connection.CreateCommand();
-        selectCommand.CommandText = "SELECT name FROM test_table WHERE id = :id";
-        selectCommand.Parameters.Add(new DmParameter("id", 1));
+        selectCommand.CommandText = "SELECT name FROM test_table WHERE id = ?";
+        selectCommand.Parameters.Add(new DmParameter { Value = 1 });
         var retrievedName = await selectCommand.ExecuteScalarAsync();
 
         // Assert
@@ -111,13 +111,14 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
 
         // Act
         await using var command = connection.CreateCommand();
+        // Use a simple query that returns database version info
         command.CommandText = "SELECT BANNER FROM V$VERSION WHERE ROWNUM = 1";
         var version = await command.ExecuteScalarAsync();
 
         // Assert
         Assert.NotNull(version);
         var versionString = version?.ToString() ?? "";
-        // DMDB version string should contain DM or similar
+        // DMDB version string should not be empty
         Assert.False(string.IsNullOrEmpty(versionString), "Version string should not be empty");
     }
 
@@ -138,9 +139,10 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         
         // Verify we can execute queries on the specific database
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT SF_GET_PARA_VALUE(2, 'SVR_NAME') FROM DUAL";
+        command.CommandText = "SELECT 1;";
         var result = await command.ExecuteScalarAsync();
         Assert.NotNull(result);
+        Assert.Equal(1, Convert.ToInt32(result));
     }
     
     [RequiresDockerFact]
@@ -155,7 +157,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         for (int i = 1; i <= 5; i++)
         {
             await using var command = connection.CreateCommand();
-            command.CommandText = $"SELECT {i} FROM DUAL";
+            command.CommandText = $"SELECT {i};";
             var result = await command.ExecuteScalarAsync();
             Assert.NotNull(result);
             Assert.Equal(i, Convert.ToInt32(result));
@@ -175,7 +177,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
             await connection.OpenAsync();
             
             await using var command = connection.CreateCommand();
-            command.CommandText = "SELECT 1 FROM DUAL";
+            command.CommandText = "SELECT 1;";
             var result = await command.ExecuteScalarAsync();
             
             Assert.NotNull(result);
