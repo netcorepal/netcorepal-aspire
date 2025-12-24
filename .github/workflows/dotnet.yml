@@ -24,7 +24,7 @@ jobs:
           include-prerelease: true
 
       - name: Install Aspire SDK
-        run: curl -sSL https://aspire.dev/install.sh -o aspire-install.sh
+        run: dotnet workload install aspire
       
       - name: Validation of Aspire SDK
         run: aspire --version
