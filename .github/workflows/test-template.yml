@@ -23,7 +23,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: ${{ matrix.framework == 'net8.0' && '8.0.x' || matrix.framework == 'net9.0' && '9.0.x' || '10.0.x' }}
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
           include-prerelease: true
 
       - name: Install Aspire CLI
