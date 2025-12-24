@@ -70,7 +70,9 @@ public class OpenGaussServerResource : ContainerResource, IResourceWithConnectio
             return connectionStringAnnotation.Resource.GetConnectionStringAsync(cancellationToken);
         }
 
-        return new ValueTask<string?>(ConnectionStringExpression.ValueExpression);
+        // Return the evaluated connection string so any reference placeholders
+        // (bindings, parameter values, secrets) are resolved at runtime.
+        return ConnectionStringExpression.GetValueAsync(cancellationToken);
     }
 
     /// <summary>
