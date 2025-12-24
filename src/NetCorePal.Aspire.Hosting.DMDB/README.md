@@ -1,88 +1,100 @@
+
 # NetCorePal.Aspire.Hosting.DMDB
 
-DMDB (达梦数据库) support for .NET Aspire applications.
+DMDB（达梦数据库）对 .NET Aspire 应用的支持。
 
-## Overview
+## 概述
 
-This package provides support for hosting DMDB database containers in .NET Aspire applications. DMDB is a Chinese domestic database management system.
+本包为 .NET Aspire 应用提供 DMDB 数据库容器的托管支持。DMDB 是国产数据库管理系统。
 
-## Installation
+## 安装
 
 ```bash
 dotnet add package NetCorePal.Aspire.Hosting.DMDB
 ```
 
-## Usage
+## 用法
 
-### Basic Usage
+
+### 基本用法
 
 ```csharp
 using Aspire.Hosting;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Add DMDB server
+// 添加 DMDB 服务器
 var dmdb = builder.AddDmdb("dmdb");
 
-// Add a database
+// 添加数据库
 var database = dmdb.AddDatabase("mydb");
 
 builder.Build().Run();
 ```
 
-### Custom Configuration
+> ⚠️ 用户名可自定义，默认值为 SYSDBA。
+
+### 自定义配置
+
 
 ```csharp
-var password = builder.AddParameter("user-password", secret: true);
-var dbaPassword = builder.AddParameter("dba-password", secret: true);
+var password = builder.AddParameter("dmdb-password", secret: true);
+var dbaPassword = builder.AddParameter("dmdb-dba-password", secret: true);
+var userName = builder.AddParameter("custom-user"); // 可选，默认 SYSDBA
 
-var dmdb = builder.AddDmdb("dmdb")
-    .WithPassword(password)
-    .WithDbaPassword(dbaPassword)
+var dmdb = builder.AddDmdb("dmdb", userName: userName, password: password, dbaPassword: dbaPassword)
     .WithHostPort(5236)
     .WithDataVolume();
 
 var database = dmdb.AddDatabase("mydb");
 ```
 
-### Using with WaitFor
+### 配合 WaitFor 使用
 
-The DMDB resources include built-in health checks. When a resource is referenced as a dependency using the `WaitFor` extension method, the dependent resource will wait until the DMDB resource is able to service requests:
+DMDB 资源内置健康检查。当资源被 `WaitFor` 扩展方法作为依赖引用时，依赖资源会等待 DMDB 资源可用后再启动：
 
 ```csharp
 var dmdb = builder.AddDmdb("dmdb");
 var database = dmdb.AddDatabase("mydb");
 
-// API will wait for the database to be ready before starting
+// API 会等待数据库就绪后再启动
 var api = builder.AddProject<Projects.MyApi>("api")
     .WaitFor(database);
 ```
 
-## Features
+## 功能特性
 
-- **Container-based deployment**: Uses the `cnxc/dm8` Docker image
-- **Password management**: Support for both user and DBA passwords
-- **Volume support**: Persist data using volumes or bind mounts
-- **Custom port mapping**: Configure host port for DMDB access
-- **Database management**: Easy creation of multiple databases
-- **Health checks**: Built-in health checks for both server and database resources
+- **基于容器的部署**：使用 `cnxc/dm8` Docker 镜像
+- **密码管理**：支持用户密码和 DBA 密码
+- **数据卷支持**：可通过卷或绑定挂载持久化数据
+- **自定义端口映射**：可配置主机端口访问 DMDB
+- **数据库管理**：便捷创建多个数据库
+- **健康检查**：服务器和数据库资源内置健康检查
 
-## Default Configuration
+## 默认配置
 
-- **Image**: `cnxc/dm8:20250423-kylin`
-- **Port**: 5236
-- **Default User**: SYSDBA
-- **Default Database**: testdb
-- **Privileged Mode**: Enabled (required by DMDB)
+- **镜像**：`cnxc/dm8:20250423-kylin`
+- **端口**：5236
+- **默认用户**：SYSDBA
 
-## Connection String Format
+> **注意：** 目前 DMDB 仅支持使用 `SYSDBA` 作为数据库用户，且用户密码和 DBA 密码必须设置为相同的值，否则容器无法正常启动。
+- **默认数据库**：testdb
+- **特权模式**：已启用（DMDB 运行所需）
 
-The connection string for DMDB follows this format:
+## 连接字符串格式
+
+DMDB 的连接字符串格式如下（与实际实现一致）：
 
 ```
-Server=host:port;User Id=username;Password=password;Database=database
+Host=主机;Port=端口;Username=用户名;Password=用户密码;Database=数据库名;DBAPassword=DBA密码;
 ```
 
-## License
+例如：
 
-This project is licensed under the same terms as the parent repository.
+```
+Host=127.0.0.1;Port=5236;Username=SYSDBA;Password=Test@1234;Database=testdb;DBAPassword=Test@1234;
+```
+
+## 许可证
+
+本项目遵循父仓库的许可协议。
