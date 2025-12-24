@@ -129,7 +129,8 @@ public class DmdbFixture : IAsyncLifetime
         await _app.StartAsync();
 
         // Wait for the database resource to become healthy
-        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5)); // DMDB may take longer to start
+        // DMDB containers may take longer to start than PostgreSQL-based databases due to initialization overhead
+        var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
         await _app.ResourceNotifications.WaitForResourceHealthyAsync(_dmdbDatabase.Resource.Name, cts.Token);
     }
 

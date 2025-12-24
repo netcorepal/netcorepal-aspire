@@ -59,9 +59,10 @@ internal static class DockerTestEnvironment
             }
 
             // Keep this short: discovery-time checks should not hang.
+            // 2-second timeout is sufficient for Docker CLI to respond during test discovery
             if (!process.WaitForExit(milliseconds: 2000))
             {
-                try { process.Kill(entireProcessTree: true); } catch { /* ignore */ }
+                try { process.Kill(entireProcessTree: true); } catch { /* Ignore cleanup errors */ }
                 return false;
             }
 
