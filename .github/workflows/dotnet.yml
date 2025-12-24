@@ -23,6 +23,9 @@ jobs:
           dotnet-version: '10.0.x'
           include-prerelease: true
 
+      - name: Install Aspire CLI
+        run: dotnet tool install --global Aspire.Cli
+
       - name: Restore dependencies
         run: dotnet restore
 
