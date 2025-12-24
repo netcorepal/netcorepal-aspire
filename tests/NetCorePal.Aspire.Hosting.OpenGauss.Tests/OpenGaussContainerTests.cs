@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Npgsql;
+using Projects;
 
 namespace NetCorePal.Aspire.Hosting.OpenGauss.Tests;
 
@@ -22,19 +23,19 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         _fixture = fixture;
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task ConnectionStateReturnsOpen()
     {
         // Arrange
-        var connectionString = await _fixture.GetConnectionStringAsync();
-        
+        var connectionString = await _fixture.GetDatabaseConnectionStringAsync();
+
         // Act
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
 
         // Assert
         Assert.Equal(System.Data.ConnectionState.Open, connection.State);
-        
+
         // Also verify we can execute a simple query
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT 1;";
@@ -43,11 +44,11 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         Assert.Equal(1, Convert.ToInt32(result));
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task CanExecuteSimpleQuery()
     {
         // Arrange
-        var connectionString = await _fixture.GetConnectionStringAsync();
+        var connectionString = await _fixture.GetDatabaseConnectionStringAsync();
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
 
@@ -61,11 +62,11 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         Assert.Equal(1, Convert.ToInt32(result));
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task CanCreateTableAndInsertData()
     {
         // Arrange
-        var connectionString = await _fixture.GetConnectionStringAsync();
+        var connectionString = await _fixture.GetDatabaseConnectionStringAsync();
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
 
@@ -101,11 +102,11 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         await dropCommand.ExecuteNonQueryAsync();
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task CanExecuteVersionQuery()
     {
         // Arrange
-        var connectionString = await _fixture.GetConnectionStringAsync();
+        var connectionString = await _fixture.GetDatabaseConnectionStringAsync();
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
 
@@ -124,7 +125,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
             $"Expected version string to contain 'openGauss' or 'PostgreSQL', but got: {versionString}");
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task DatabaseResourceIncludesDatabaseName()
     {
         // Arrange
@@ -138,7 +139,7 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
         Assert.Equal(System.Data.ConnectionState.Open, connection.State);
-        
+
         // Verify we can execute queries on the specific database
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT current_database();";
@@ -146,12 +147,12 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
         Assert.NotNull(result);
         Assert.Equal("testdb", result.ToString());
     }
-    
-    [RequiresDockerFact]
+
+    [Fact]
     public async Task CanExecuteMultipleQueriesOnSameConnection()
     {
         // Arrange
-        var connectionString = await _fixture.GetConnectionStringAsync();
+        var connectionString = await _fixture.GetDatabaseConnectionStringAsync();
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync();
 
@@ -165,23 +166,23 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
             Assert.Equal(i, Convert.ToInt32(result));
         }
     }
-    
-    [RequiresDockerFact]
+
+    [Fact]
     public async Task ConnectionPoolingWorks()
     {
         // Arrange
-        var connectionString = await _fixture.GetConnectionStringAsync();
+        var connectionString = await _fixture.GetDatabaseConnectionStringAsync();
 
         // Act - Open and close multiple connections
         for (int i = 0; i < 3; i++)
         {
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync();
-            
+
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT 1;";
             var result = await command.ExecuteScalarAsync();
-            
+
             Assert.NotNull(result);
             Assert.Equal(1, Convert.ToInt32(result));
         }
@@ -197,19 +198,12 @@ public class OpenGaussFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         // Skip initialization if Docker/Aspire orchestration is unavailable
-        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
-        {
-            return;
-        }
-
-        var builder = DistributedApplication.CreateBuilder();
-        
-        _openGaussServer = builder.AddOpenGauss("opengauss");
+        var builder = await DistributedApplicationTestingBuilder.CreateAsync<NetCorePal_Aspire_Hosting_SharedAppHost>();
+        var password = builder.AddParameter("database-password", value: "Test@1234", secret: true);
+        _openGaussServer = builder.AddOpenGauss("opengauss").WithPassword(password);
         _openGaussDatabase = _openGaussServer.AddDatabase("testdb");
-
         _app = builder.Build();
         await _app.StartAsync();
-
         // Wait for the database resource to become healthy instead of sleeping.
         var cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         await _app.ResourceNotifications.WaitForResourceHealthyAsync(_openGaussDatabase.Resource.Name, cts.Token);
@@ -224,39 +218,9 @@ public class OpenGaussFixture : IAsyncLifetime
         }
     }
 
-    public async Task<string> GetConnectionStringAsync()
-    {
-        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
-        {
-            throw new InvalidOperationException(
-                "Container integration tests are disabled or unavailable. " +
-                "Ensure Docker is installed/running and Aspire orchestration is configured.");
-        }
-
-        if (_openGaussServer?.Resource is null)
-        {
-            throw new InvalidOperationException("OpenGauss server resource is not initialized.");
-        }
-
-        var connectionString = await _openGaussServer.Resource.GetConnectionStringAsync();
-        if (connectionString is null)
-        {
-            throw new InvalidOperationException("Connection string is null.");
-        }
-        
-        // Add connection pooling parameter to match testcontainers implementation
-        return connectionString + ";No Reset On Close=true;";
-    }
 
     public async Task<string> GetDatabaseConnectionStringAsync()
     {
-        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
-        {
-            throw new InvalidOperationException(
-                "Container integration tests are disabled or unavailable. " +
-                "Ensure Docker is installed/running and Aspire orchestration is configured.");
-        }
-
         if (_openGaussDatabase?.Resource is null)
         {
             throw new InvalidOperationException("OpenGauss database resource is not initialized.");
@@ -267,7 +231,7 @@ public class OpenGaussFixture : IAsyncLifetime
         {
             throw new InvalidOperationException("Connection string is null.");
         }
-        
+
         // Add connection pooling parameter to match testcontainers implementation
         return connectionString + ";No Reset On Close=true;";
     }

@@ -79,7 +79,8 @@ public class DmdbServerResource : ContainerResource, IResourceWithConnectionStri
             return connectionStringAnnotation.Resource.GetConnectionStringAsync(cancellationToken);
         }
 
-        return new ValueTask<string?>(ConnectionStringExpression.ValueExpression);
+        // Return the evaluated connection string so placeholders are resolved.
+        return ConnectionStringExpression.GetValueAsync(cancellationToken);
     }
 
     /// <summary>

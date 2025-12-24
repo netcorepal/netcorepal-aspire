@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using Dm;
+using Projects;
 
 namespace NetCorePal.Aspire.Hosting.DMDB.Tests;
 
@@ -22,19 +23,19 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         _fixture = fixture;
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task ConnectionStateReturnsOpen()
     {
         // Arrange
         var connectionString = await _fixture.GetConnectionStringAsync();
-        
+
         // Act
         await using var connection = new DmConnection(connectionString);
         await connection.OpenAsync();
 
         // Assert
         Assert.Equal(System.Data.ConnectionState.Open, connection.State);
-        
+
         // Also verify we can execute a simple query
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT 1;";
@@ -43,7 +44,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         Assert.Equal(1, Convert.ToInt32(result));
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task CanExecuteSimpleQuery()
     {
         // Arrange
@@ -61,7 +62,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         Assert.Equal(1, Convert.ToInt32(result));
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task CanCreateTableAndInsertData()
     {
         // Arrange
@@ -101,7 +102,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         await dropCommand.ExecuteNonQueryAsync();
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task CanExecuteVersionQuery()
     {
         // Arrange
@@ -122,7 +123,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         Assert.False(string.IsNullOrEmpty(versionString), "Version string should not be empty");
     }
 
-    [RequiresDockerFact]
+    [Fact]
     public async Task DatabaseResourceIncludesDatabaseName()
     {
         // Arrange
@@ -136,7 +137,7 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         await using var connection = new DmConnection(connectionString);
         await connection.OpenAsync();
         Assert.Equal(System.Data.ConnectionState.Open, connection.State);
-        
+
         // Verify we can execute queries on the specific database
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT 1;";
@@ -144,8 +145,8 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         Assert.NotNull(result);
         Assert.Equal(1, Convert.ToInt32(result));
     }
-    
-    [RequiresDockerFact]
+
+    [Fact]
     public async Task CanExecuteMultipleQueriesOnSameConnection()
     {
         // Arrange
@@ -163,8 +164,8 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
             Assert.Equal(i, Convert.ToInt32(result));
         }
     }
-    
-    [RequiresDockerFact]
+
+    [Fact]
     public async Task ConnectionPoolingWorks()
     {
         // Arrange
@@ -175,11 +176,11 @@ public class DmdbContainerTests : IClassFixture<DmdbFixture>
         {
             await using var connection = new DmConnection(connectionString);
             await connection.OpenAsync();
-            
+
             await using var command = connection.CreateCommand();
             command.CommandText = "SELECT 1;";
             var result = await command.ExecuteScalarAsync();
-            
+
             Assert.NotNull(result);
             Assert.Equal(1, Convert.ToInt32(result));
         }
@@ -194,14 +195,8 @@ public class DmdbFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Skip initialization if Docker/Aspire orchestration is unavailable
-        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
-        {
-            return;
-        }
+        var builder = await DistributedApplicationTestingBuilder.CreateAsync<NetCorePal_Aspire_Hosting_SharedAppHost>();
 
-        var builder = DistributedApplication.CreateBuilder();
-        
         _dmdbServer = builder.AddDmdb("dmdb");
         _dmdbDatabase = _dmdbServer.AddDatabase("testdb");
 
@@ -224,13 +219,6 @@ public class DmdbFixture : IAsyncLifetime
 
     public async Task<string> GetConnectionStringAsync()
     {
-        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
-        {
-            throw new InvalidOperationException(
-                "Container integration tests are disabled or unavailable. " +
-                "Ensure Docker is installed/running and Aspire orchestration is configured.");
-        }
-
         if (_dmdbServer?.Resource is null)
         {
             throw new InvalidOperationException("DMDB server resource is not initialized.");
@@ -241,19 +229,12 @@ public class DmdbFixture : IAsyncLifetime
         {
             throw new InvalidOperationException("Connection string is null.");
         }
-        
+
         return connectionString;
     }
 
     public async Task<string> GetDatabaseConnectionStringAsync()
     {
-        if (!DockerTestEnvironment.IsContainerIntegrationTestAvailable())
-        {
-            throw new InvalidOperationException(
-                "Container integration tests are disabled or unavailable. " +
-                "Ensure Docker is installed/running and Aspire orchestration is configured.");
-        }
-
         if (_dmdbDatabase?.Resource is null)
         {
             throw new InvalidOperationException("DMDB database resource is not initialized.");
@@ -264,9 +245,7 @@ public class DmdbFixture : IAsyncLifetime
         {
             throw new InvalidOperationException("Connection string is null.");
         }
-        
+
         return connectionString;
     }
-
-    // Docker detection is centralized in DockerTestEnvironment.
 }

@@ -15,5 +15,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/NetCorePal.Aspire.Hosting.OpenGauss.Tests/NetCorePal.Aspire.Hosting.OpenGauss.Tests.csproj" />
     <Project Path="tests/NetCorePal.Aspire.Hosting.DMDB.Tests/NetCorePal.Aspire.Hosting.DMDB.Tests.csproj" />
+    <Project Path="tests/NetCorePal.Aspire.Hosting.SharedAppHost/NetCorePal.Aspire.Hosting.SharedAppHost.csproj" />
   </Folder>
 </Solution>

@@ -14,6 +14,7 @@ public static class DmdbBuilderExtensions
     private const int DmdbPortDefault = 5236;
     private const string DefaultDmdbUserName = "SYSDBA";
     private const string DefaultDatabaseName = "testdb";
+    private const string DefaultDmdbDbaPassword = "Test@1234";
 
     /// <summary>
     /// Adds a DMDB resource to the application model. A container is used for local development.
@@ -46,15 +47,13 @@ public static class DmdbBuilderExtensions
         ArgumentNullException.ThrowIfNull(name);
 
         var passwordParameter = password?.Resource ??
-                                ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder,
-                                    $"{name}-password");
+                                builder.AddParameter($"{name}-password", value: DefaultDmdbDbaPassword).Resource;
 
         var dbaPasswordParameter = dbaPassword?.Resource ??
-                                   ParameterResourceBuilderExtensions.CreateDefaultPasswordParameter(builder,
-                                       $"{name}-dba-password", special: false);
+                                   builder.AddParameter($"{name}-dba-password", value: DefaultDmdbDbaPassword).Resource;
 
-        var dmdbServer = new DmdbServerResource(name, userName?.Resource, passwordParameter,
-            dbaPasswordParameter);
+        var dmdbServer = new DmdbServerResource(name, userName?.Resource,
+            passwordParameter, dbaPasswordParameter);
 
         // Register a health check that can be associated with the resource so dependent resources can WaitFor() it.
         var serverHealthCheckKey = $"{name}-dmdb";
@@ -293,6 +292,7 @@ public static class DmdbBuilderExtensions
                         {
                             host = serverValue;
                         }
+
                         break;
                     }
                 }
