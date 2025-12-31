@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Aspire.Hosting</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>NetCorePal.Aspire.Hosting.MongoDB</PackageId>
+    <Description>Add replica set to MongoDB when using Aspire</Description>
+    <PackageTags>aspire;mongodb;hosting</PackageTags>
+  </PropertyGroup>
+  
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting" />
+    <PackageReference Include="Aspire.Hosting.MongoDB" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="Mongo.Dockerfile" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Mongo.Dockerfile">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>true</Pack>
+      <PackageCopyToOutput>true</PackageCopyToOutput>
+    </Content>
+  </ItemGroup>
+</Project>
