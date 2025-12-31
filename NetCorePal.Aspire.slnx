@@ -11,10 +11,12 @@
   <Folder Name="/src/">
     <Project Path="src/NetCorePal.Aspire.Hosting.OpenGauss/NetCorePal.Aspire.Hosting.OpenGauss.csproj" />
     <Project Path="src/NetCorePal.Aspire.Hosting.DMDB/NetCorePal.Aspire.Hosting.DMDB.csproj" />
+    <Project Path="src/NetCorePal.Aspire.Hosting.MongoDB/NetCorePal.Aspire.Hosting.MongoDB.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NetCorePal.Aspire.Hosting.OpenGauss.Tests/NetCorePal.Aspire.Hosting.OpenGauss.Tests.csproj" />
     <Project Path="tests/NetCorePal.Aspire.Hosting.DMDB.Tests/NetCorePal.Aspire.Hosting.DMDB.Tests.csproj" />
+    <Project Path="tests/NetCorePal.Aspire.Hosting.MongoDB.Tests/NetCorePal.Aspire.Hosting.MongoDB.Tests.csproj" />
     <Project Path="tests/NetCorePal.Aspire.Hosting.SharedAppHost/NetCorePal.Aspire.Hosting.SharedAppHost.csproj" />
   </Folder>
 </Solution>
