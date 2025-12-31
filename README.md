@@ -15,6 +15,7 @@
 | --- | --- | --- |
 | [NetCorePal.Aspire.Hosting.OpenGauss](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.OpenGauss)（[文档](./src/NetCorePal.Aspire.Hosting.OpenGauss/README.md)） | [![NuGet](https://img.shields.io/nuget/v/NetCorePal.Aspire.Hosting.OpenGauss.svg)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.OpenGauss) | [![NuGet Version](https://img.shields.io/nuget/vpre/NetCorePal.Aspire.Hosting.OpenGauss?label=nuget-pre)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.OpenGauss) |
 | [NetCorePal.Aspire.Hosting.DMDB](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.DMDB)（[文档](./src/NetCorePal.Aspire.Hosting.DMDB/README.md)） | [![NuGet](https://img.shields.io/nuget/v/NetCorePal.Aspire.Hosting.DMDB.svg)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.DMDB) | [![NuGet Version](https://img.shields.io/nuget/vpre/NetCorePal.Aspire.Hosting.DMDB?label=nuget-pre)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.DMDB) |
+| [NetCorePal.Aspire.Hosting.MongoDB](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.MongoDB)（[文档](./src/NetCorePal.Aspire.Hosting.MongoDB/README.md)） | [![NuGet](https://img.shields.io/nuget/v/NetCorePal.Aspire.Hosting.MongoDB.svg)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.MongoDB) | [![NuGet Version](https://img.shields.io/nuget/vpre/NetCorePal.Aspire.Hosting.MongoDB?label=nuget-pre)](https://www.nuget.org/packages/NetCorePal.Aspire.Hosting.MongoDB) |
 
 ## 本机快速验证
 

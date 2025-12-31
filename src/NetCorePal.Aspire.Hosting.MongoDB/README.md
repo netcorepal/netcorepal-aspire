@@ -1,96 +1,67 @@
-````markdown
 # NetCorePal.Aspire.Hosting.MongoDB
 
-MongoDB support for .NET Aspire applications.
+为 Aspire 提供创建 MongoDB 副本集的能力。
 
-## Overview
+## 扩展方法
 
-This package provides extension methods for adding MongoDB resources to your .NET Aspire applications. It sets up the official MongoDB container image with sensible defaults, connection string handling, and built-in health checks.
+使用以下扩展方法将副本集添加到 MongoDB，可以指定内容路径、Dockerfile 以覆盖密钥文件名的位置：
 
-## Installation
-
-```bash
-dotnet add package NetCorePal.Aspire.Hosting.MongoDB
+```csharp
+IResourceBuilder<MongoDBServerResource> WithReplicaSet(
+    this IResourceBuilder<MongoDBServerResource> builder, 
+    string contextPath, 
+    string dockerFile, 
+    string keyFileName = "/etc/mongo-keyfile")
 ```
 
-## Usage
+或者，如果您想使用此 NuGet 包中包含的 `Mongo.Dockerfile`，可以使用以下扩展方法。此方法将尝试在执行程序集的同一目录中定位 `Mongo.Dockerfile`：
 
-### Basic Usage
+```csharp
+IResourceBuilder<MongoDBServerResource> WithReplicaSet(
+    this IResourceBuilder<MongoDBServerResource> builder)
+```
+
+使用扩展方法 `AddMongoReplicaSet()` 将 MongoDB 副本集资源添加到分布式应用程序构建器：
+
+```csharp
+IResourceBuilder<MongoReplicaSetResource> AddMongoReplicaSet(
+    this IDistributedApplicationBuilder builder, 
+    string name, 
+    IResourceWithConnectionString mongoDbResource)
+```
+
+## 完整示例
+
+使用提供的 `Mongo.Dockerfile` 和示例 API 项目的完整示例：
 
 ```csharp
 var builder = DistributedApplication.CreateBuilder(args);
 
-var mongo = builder.AddMongoDB("mongo");
-var database = mongo.AddDatabase("appdb");
+var username = builder.AddParameter("mongo-user", "admin");
+var password = builder.AddParameter("mongo-password", "admin");
+const int port = 27017;
 
-var api = builder.AddProject<Projects.Api>("api")
-    .WithReference(database);
+var mongo = builder
+    .AddMongoDB("mongo", port, username, password)
+    .WithLifetime(ContainerLifetime.Persistent)
+    .WithReplicaSet();
 
-builder.Build().Run();
+var mongodb = mongo
+    .AddDatabase("mongoDatabase");
+
+var mongoReplicaSet = builder
+    .AddMongoReplicaSet("mongoDb", mongodb.Resource);
+
+builder.AddProject<Projects.Api>("api")
+    .WithReference(mongodb)
+    .WithReference(mongoReplicaSet)
+    .WaitFor(mongodb)
+    .WaitFor(mongoReplicaSet);
+
+await builder
+    .Build()
+    .RunAsync();
 ```
-
-### Custom Port and Credentials
-
-```csharp
-var builder = DistributedApplication.CreateBuilder(args);
-
-var rootUser = builder.AddParameter("mongo-user");
-var rootPassword = builder.AddParameter("mongo-password", secret: true);
-
-var mongo = builder.AddMongoDB(
-        name: "mongo",
-        userName: rootUser,
-        password: rootPassword,
-        databaseName: "admin",
-        port: 27018)
-    .WithDataVolume();
-
-builder.Build().Run();
-```
-
-### Initialization Scripts
-
-Mount initialization scripts that should run on container start:
-
-```csharp
-var mongo = builder.AddMongoDB("mongo")
-    .WithInitBindMount("./init-scripts");
-```
-
-### Data Persistence
-
-Use a named volume or bind mount for `/data/db`:
-
-```csharp
-var mongo = builder.AddMongoDB("mongo")
-    .WithDataVolume();
-
-// or
-
-var mongo = builder.AddMongoDB("mongo")
-    .WithDataBindMount("./mongo-data");
-```
-
-## Defaults
-
-- Image: `mongo:7.0` (registry: `docker.io`)
-- Port: `27017`
-- Root user: `root`
-- Default database: `admin`
-- Health checks: server and per-database health checks using MongoDB ping
-
-## Connection String Format
-
-```
-mongodb://{username}:{password}@{host}:{port}/{database}?authSource=admin
-```
-
-When using `AddDatabase`, the `{database}` placeholder comes from the resource name unless overridden.
-
-## License
-
-This project follows the same license as the repository it belongs to.
-````
 
 ## 参考资料
 

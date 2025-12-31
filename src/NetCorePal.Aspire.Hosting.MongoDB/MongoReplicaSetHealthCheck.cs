@@ -2,7 +2,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
-namespace Aspire.Hosting.MongoDB;
+namespace Aspire.Hosting;
 
 public class MongoReplicaSetHealthCheck(MongoClientSettings mongoClientSettings) : IHealthCheck
 {
