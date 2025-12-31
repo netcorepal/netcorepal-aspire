@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using MongoDB.Driver.Core.Configuration;
 
-namespace Aspire.Hosting.MongoDB;
+namespace Aspire.Hosting;
 
 public static class MongoReplicaSetBuilderExtensions
 {

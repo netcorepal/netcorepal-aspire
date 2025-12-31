@@ -1,6 +1,6 @@
 using Aspire.Hosting.ApplicationModel;
 
-namespace Aspire.Hosting.MongoDB;
+namespace Aspire.Hosting;
 
 public class MongoReplicaSetResource(string name, IResourceWithConnectionString parent)
     : Resource(name), IResourceWithConnectionString, IResourceWithParent<IResourceWithConnectionString>
