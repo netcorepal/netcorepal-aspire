@@ -8,7 +8,8 @@ namespace Aspire.Hosting.ApplicationModel;
 /// <param name="name">The name of the resource.</param>
 /// <param name="databaseName">The database name.</param>
 /// <param name="openGaussParentResource">The OpenGauss parent resource associated with this database.</param>
-public class OpenGaussDatabaseResource(string name, string databaseName, OpenGaussServerResource openGaussParentResource) : Resource(name), IResourceWithParent<OpenGaussServerResource>, IResourceWithConnectionString
+/// <param name="dbCompatibility">The OpenGauss database compatibility mode (e.g., PG).</param>
+public class OpenGaussDatabaseResource(string name, string databaseName, OpenGaussServerResource openGaussParentResource, string dbCompatibility = "PG") : Resource(name), IResourceWithParent<OpenGaussServerResource>, IResourceWithConnectionString
 {
     /// <summary>
     /// Gets the parent OpenGauss container resource.
@@ -26,6 +27,11 @@ public class OpenGaussDatabaseResource(string name, string databaseName, OpenGau
     /// Gets the database name.
     /// </summary>
     public string DatabaseName { get; } = databaseName;
+
+    /// <summary>
+    /// Gets the database compatibility mode.
+    /// </summary>
+    public string DbCompatibility { get; } = dbCompatibility;
 
     /// <summary>
     /// Gets the connection string for the OpenGauss database.

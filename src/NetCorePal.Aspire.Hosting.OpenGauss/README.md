@@ -30,6 +30,33 @@ var api = builder.AddProject<Projects.Api>("api")
 builder.Build().Run();
 ```
 
+### Database Compatibility Modes
+
+`AddDatabase` 支持指定 OpenGauss 兼容模式参数 `dbcompatibility`，用于按不同方言创建目标库：
+
+- PG：PostgreSQL 兼容（默认）
+- A：Oracle 兼容
+- B：MySQL 兼容
+
+示例：
+
+```csharp
+var opengauss = builder.AddOpenGauss("opengauss");
+
+// 按 PostgreSQL 兼容创建数据库（等同默认）
+var dbPg = opengauss.AddDatabase("mydb_pg", dbcompatibility: "PG");
+
+// 按 Oracle 兼容创建数据库
+var dbOracle = opengauss.AddDatabase("mydb_oracle", dbcompatibility: "A");
+
+// 按 MySQL 兼容创建数据库
+var dbMySql = opengauss.AddDatabase("mydb_mysql", dbcompatibility: "B");
+```
+
+健康检查行为：
+- 先连接默认库 `postgres` 执行 `SELECT 1;`
+- 探活成功后，若目标库不存在则执行 `CREATE DATABASE <db> DBCOMPATIBILITY = '<mode>';`
+
 ### Custom Port and Credentials
 
 Specify a custom port and credentials:
@@ -99,6 +126,8 @@ builder.Build().Run();
 
 - **Container-based deployment**: Uses the official `opengauss/opengauss` Docker image
 - **Built-in health checks**: Automatically waits for the database to be ready
+    - Server 级健康检查：默认库 `postgres` 探活
+    - Database 级健康检查：默认库探活后按 `dbcompatibility` 创建目标库（若不存在）
 - **Connection string management**: Automatically generates connection strings for dependent resources
 - **Data persistence**: Support for volumes and bind mounts
 - **Initialization scripts**: Easy mounting of initialization scripts

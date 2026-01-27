@@ -56,9 +56,8 @@ public static class OpenGaussBuilderExtensions
         var serverHealthCheckKey = $"{name}-opengauss";
         builder.Services.AddHealthChecks().AddCheck(
             serverHealthCheckKey,
-            new OpenGaussConnectionHealthCheck(
-                ct => openGaussServer.ConnectionStringExpression.GetValueAsync(ct),
-                DefaultDatabaseName));
+            new ServerConnectionHealthCheck(
+                ct => openGaussServer.ConnectionStringExpression.GetValueAsync(ct)));
 
         return builder.AddResource(openGaussServer)
             .WithContainerRuntimeArgs("--privileged")
@@ -68,6 +67,7 @@ public static class OpenGaussBuilderExtensions
             .WithImageRegistry(OpenGaussContainerImageTags.Registry)
             .WithEnvironment("GS_PASSWORD", openGaussServer.PasswordParameter)
             .WithEnvironment("PGPASSWORD", openGaussServer.PasswordParameter) // OpenGauss is PostgreSQL-compatible and uses PGPASSWORD for client authentication
+            //.WithEnvironment("GS_DB", "postgres") // Default database
             .WithHealthCheck(serverHealthCheckKey)
             .PublishAsContainer();
     }
@@ -365,6 +365,8 @@ public static class OpenGaussBuilderExtensions
     /// <param name="builder">The OpenGauss server resource builder.</param>
     /// <param name="name">The name of the resource. This name will be used as the connection string name when referenced in a dependency.</param>
     /// <param name="databaseName">The name of the database. If not provided, this defaults to the same value as <paramref name="name"/>.</param>
+    /// <param name="dbcompatibility">The database compatibility mode. Defaults to 'PG'. Supported values:
+    /// 'PG' → PostgreSQL, 'A' → Oracle, 'B' → MySQL.</param>
     /// <returns>A reference to the <see cref="IResourceBuilder{OpenGaussDatabaseResource}"/>.</returns>
     /// <remarks>
     /// <para>
@@ -376,7 +378,8 @@ public static class OpenGaussBuilderExtensions
     public static IResourceBuilder<OpenGaussDatabaseResource> AddDatabase(
         this IResourceBuilder<OpenGaussServerResource> builder,
         string name,
-        string? databaseName = null)
+        string? databaseName = null,
+        string dbcompatibility = "PG")
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(name);
@@ -385,31 +388,29 @@ public static class OpenGaussBuilderExtensions
         databaseName ??= name;
 
         builder.Resource.Databases.TryAdd(name, databaseName);
-        builder.WithEnvironment("GS_DB", databaseName);
-        var openGaussDatabase = new OpenGaussDatabaseResource(name, databaseName, builder.Resource);
+        var openGaussDatabase = new OpenGaussDatabaseResource(name, databaseName, builder.Resource, dbcompatibility);
 
         var databaseHealthCheckKey = $"{builder.Resource.Name}-{name}-opengaussdb";
         builder.ApplicationBuilder.Services.AddHealthChecks().AddCheck(
             databaseHealthCheckKey,
-            new OpenGaussConnectionHealthCheck(
+            new DatabaseConnectionHealthCheck(
                 ct => openGaussDatabase.ConnectionStringExpression.GetValueAsync(ct),
-                databaseName));
+                databaseName,
+                dbcompatibility));
 
         return builder.ApplicationBuilder.AddResource(openGaussDatabase)
             .WithHealthCheck(databaseHealthCheckKey);
     }
 
-    private sealed class OpenGaussConnectionHealthCheck : IHealthCheck
+    private sealed class ServerConnectionHealthCheck : IHealthCheck
     {
         private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(3);
 
         private readonly Func<CancellationToken, ValueTask<string?>> _getConnectionString;
-        private readonly string _databaseName;
-
-        public OpenGaussConnectionHealthCheck(Func<CancellationToken, ValueTask<string?>> getConnectionString, string databaseName)
+        
+        public ServerConnectionHealthCheck(Func<CancellationToken, ValueTask<string?>> getConnectionString)
         {
             _getConnectionString = getConnectionString;
-            _databaseName = databaseName;
         }
 
         public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
@@ -438,11 +439,12 @@ public static class OpenGaussBuilderExtensions
 
             try
             {
+                // Server-level: ping default database only.
                 var csb = new NpgsqlConnectionStringBuilder(connectionString)
                 {
                     Timeout = (int)DefaultTimeout.TotalSeconds,
                     CommandTimeout = (int)DefaultTimeout.TotalSeconds,
-                    Database = string.IsNullOrWhiteSpace(_databaseName) ? DefaultDatabaseName : _databaseName,
+                    Database = DefaultDatabaseName,
                 };
 
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -464,6 +466,108 @@ public static class OpenGaussBuilderExtensions
                 return HealthCheckResult.Unhealthy("OpenGauss is not ready.", ex);
             }
         }
+    }
+
+    /// <summary>
+    /// Health check for a target database. Pings default database 'postgres', then ensures
+    /// the target database exists, creating it with the specified DBCOMPATIBILITY if missing.
+    /// </summary>
+    private sealed class DatabaseConnectionHealthCheck : IHealthCheck
+    {
+        private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(3);
+
+        private readonly Func<CancellationToken, ValueTask<string?>> _getConnectionString;
+        private readonly string _databaseName;
+        private readonly string _dbCompatibility;
+
+        public DatabaseConnectionHealthCheck(Func<CancellationToken, ValueTask<string?>> getConnectionString, string databaseName, string dbCompatibility)
+        {
+            _getConnectionString = getConnectionString;
+            _databaseName = databaseName;
+            _dbCompatibility = dbCompatibility;
+        }
+
+        public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+        {
+            string? connectionString;
+            try
+            {
+                connectionString = await _getConnectionString(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                return HealthCheckResult.Unhealthy("Failed to resolve OpenGauss connection string.", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                return HealthCheckResult.Unhealthy("OpenGauss connection string is empty.");
+            }
+
+            if (connectionString.Contains(".bindings.", StringComparison.Ordinal))
+            {
+                return HealthCheckResult.Unhealthy("OpenGauss connection string is not resolved yet.");
+            }
+
+            try
+            {
+                // Connect to default database first
+                var csb = new NpgsqlConnectionStringBuilder(connectionString)
+                {
+                    Timeout = (int)DefaultTimeout.TotalSeconds,
+                    CommandTimeout = (int)DefaultTimeout.TotalSeconds,
+                    Database = DefaultDatabaseName,
+                };
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(DefaultTimeout);
+
+                await using var connection = new NpgsqlConnection(csb.ConnectionString);
+                await connection.OpenAsync(timeoutCts.Token).ConfigureAwait(false);
+
+                // 1) Ping default database
+                await using (var ping = connection.CreateCommand())
+                {
+                    ping.CommandText = "SELECT 1;";
+                    var pingResult = await ping.ExecuteScalarAsync(timeoutCts.Token).ConfigureAwait(false);
+                    if (pingResult is null)
+                    {
+                        return HealthCheckResult.Unhealthy("OpenGauss ping returned null.");
+                    }
+                }
+
+                // 2) Ensure target database exists, create if missing with compatibility
+                if (!string.Equals(_databaseName, DefaultDatabaseName, StringComparison.OrdinalIgnoreCase))
+                {
+                    await using (var existsCmd = connection.CreateCommand())
+                    {
+                        existsCmd.CommandText = "SELECT 1 FROM pg_database WHERE datname = @dbname;";
+                        existsCmd.Parameters.AddWithValue("@dbname", _databaseName);
+                        var exists = await existsCmd.ExecuteScalarAsync(timeoutCts.Token).ConfigureAwait(false);
+                        if (exists is null)
+                        {
+                            var safeCompat = (_dbCompatibility ?? "PG").Trim();
+                            var dbIdent = QuoteIdentifier(_databaseName);
+                            await using var createCmd = connection.CreateCommand();
+                            createCmd.CommandText = $"CREATE DATABASE {dbIdent} DBCOMPATIBILITY = '{safeCompat}';";
+                            await createCmd.ExecuteNonQueryAsync(timeoutCts.Token).ConfigureAwait(false);
+                        }
+                    }
+                }
+
+                return HealthCheckResult.Healthy();
+            }
+            catch (Exception ex)
+            {
+                return HealthCheckResult.Unhealthy("OpenGauss is not ready.", ex);
+            }
+        }
+    }
+
+    private static string QuoteIdentifier(string identifier)
+    {
+        // Quote with double quotes and escape internal quotes
+        return "\"" + identifier.Replace("\"", "\"\"") + "\"";
     }
 
     /// <summary>
