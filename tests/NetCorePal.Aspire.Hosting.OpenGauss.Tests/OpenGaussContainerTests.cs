@@ -45,6 +45,30 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
     }
 
     [Fact]
+    public async Task Database_DbCompatibility_Should_Equal()
+    {
+        var connectionString = await _fixture.GetDatabaseConnectionStringAsync();
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command2 = connection.CreateCommand();
+        command2.CommandText = """
+                                   SELECT name, setting
+                                   FROM pg_settings
+                                   WHERE name ~* 'sql_compatibility';
+                               """;
+        await using var reader = await command2.ExecuteReaderAsync();
+        var compatibilitySettings = new List<(string Name, string Setting)>();
+        while (await reader.ReadAsync())
+        {
+            var name = reader.GetString(0);
+            var setting = reader.GetString(1);
+            compatibilitySettings.Add((name, setting));
+        }
+        Assert.NotEmpty(compatibilitySettings);
+        Assert.Equal(_fixture.Database!.Resource.DbCompatibility, compatibilitySettings[0].Setting);
+    }
+
+    [Fact]
     public async Task CanExecuteSimpleQuery()
     {
         // Arrange
@@ -194,6 +218,10 @@ public class OpenGaussFixture : IAsyncLifetime
     private DistributedApplication? _app;
     private IResourceBuilder<OpenGaussServerResource>? _openGaussServer;
     private IResourceBuilder<OpenGaussDatabaseResource>? _openGaussDatabase;
+    
+    public IResourceBuilder<OpenGaussServerResource>? Server => _openGaussServer;
+    public IResourceBuilder<OpenGaussDatabaseResource>? Database => _openGaussDatabase;
+    
 
     public async Task InitializeAsync()
     {
