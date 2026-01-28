@@ -14,11 +14,11 @@ namespace NetCorePal.Aspire.Hosting.OpenGauss.Tests;
 /// 1. Ensure Docker is installed and running
 /// 2. Run: dotnet test --filter "FullyQualifiedName~OpenGaussContainerTests"
 /// </summary>
-public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
+public abstract class OpenGaussContainerTestsBase
 {
-    private readonly OpenGaussFixture _fixture;
+    private readonly OpenGaussFixtureBase _fixture;
 
-    public OpenGaussContainerTests(OpenGaussFixture fixture)
+    protected OpenGaussContainerTestsBase(OpenGaussFixtureBase fixture)
     {
         _fixture = fixture;
     }
@@ -213,7 +213,47 @@ public class OpenGaussContainerTests : IClassFixture<OpenGaussFixture>
     }
 }
 
-public class OpenGaussFixture : IAsyncLifetime
+public sealed class OpenGaussContainerTests : OpenGaussContainerTestsBase, IClassFixture<OpenGaussDefaultFixture>
+{
+    public OpenGaussContainerTests(OpenGaussDefaultFixture fixture)
+        : base(fixture)
+    {
+    }
+}
+
+public sealed class OpenGaussDifferentPasswordContainerTests : OpenGaussContainerTestsBase, IClassFixture<OpenGaussDifferentPasswordFixture>
+{
+    public OpenGaussDifferentPasswordContainerTests(OpenGaussDifferentPasswordFixture fixture)
+        : base(fixture)
+    {
+    }
+}
+
+public sealed class OpenGaussWithPgAdminContainerTests : OpenGaussContainerTestsBase, IClassFixture<OpenGaussWithPgAdminFixture>
+{
+    public OpenGaussWithPgAdminContainerTests(OpenGaussWithPgAdminFixture fixture)
+        : base(fixture)
+    {
+    }
+}
+
+public sealed class OpenGaussWithPgWebContainerTests : OpenGaussContainerTestsBase, IClassFixture<OpenGaussWithPgWebFixture>
+{
+    public OpenGaussWithPgWebContainerTests(OpenGaussWithPgWebFixture fixture)
+        : base(fixture)
+    {
+    }
+}
+
+public sealed class OpenGaussAddDatabaseNameOnlyContainerTests : OpenGaussContainerTestsBase, IClassFixture<OpenGaussAddDatabaseNameOnlyFixture>
+{
+    public OpenGaussAddDatabaseNameOnlyContainerTests(OpenGaussAddDatabaseNameOnlyFixture fixture)
+        : base(fixture)
+    {
+    }
+}
+
+public abstract class OpenGaussFixtureBase : IAsyncLifetime
 {
     private DistributedApplication? _app;
     private IResourceBuilder<OpenGaussServerResource>? _openGaussServer;
@@ -221,15 +261,60 @@ public class OpenGaussFixture : IAsyncLifetime
     
     public IResourceBuilder<OpenGaussServerResource>? Server => _openGaussServer;
     public IResourceBuilder<OpenGaussDatabaseResource>? Database => _openGaussDatabase;
-    
+
+    protected virtual string ServerName => $"opengauss-{GetType().Name.ToLowerInvariant()}";
+
+    protected virtual string DatabaseName => "testdb";
+
+    protected virtual string DatabaseResourceName => $"{ServerName}-db";
+
+    protected virtual string DbCompatibility => "PG";
+
+    protected virtual string Password => "Test@1234";
+
+    protected virtual string? UserName => null;
+
+    protected virtual IResourceBuilder<OpenGaussServerResource> ConfigureServer(
+        IResourceBuilder<OpenGaussServerResource> server,
+        IDistributedApplicationTestingBuilder builder)
+    {
+        return server;
+    }
+
+    protected virtual IResourceBuilder<OpenGaussDatabaseResource> ConfigureDatabase(
+        IResourceBuilder<OpenGaussDatabaseResource> database,
+        IDistributedApplicationTestingBuilder builder)
+    {
+        return database;
+    }
+
+    protected virtual IResourceBuilder<OpenGaussDatabaseResource> AddDatabase(
+        IResourceBuilder<OpenGaussServerResource> server,
+        IDistributedApplicationTestingBuilder builder)
+    {
+        var database = server.AddDatabase(DatabaseResourceName, DatabaseName, DbCompatibility);
+        return ConfigureDatabase(database, builder);
+    }
 
     public async Task InitializeAsync()
     {
         // Skip initialization if Docker/Aspire orchestration is unavailable
         var builder = await DistributedApplicationTestingBuilder.CreateAsync<NetCorePal_Aspire_Hosting_SharedAppHost>();
-        var password = builder.AddParameter("database-password", value: "Test@1234", secret: true);
-        _openGaussServer = builder.AddOpenGauss("opengauss").WithPassword(password);
-        _openGaussDatabase = _openGaussServer.AddDatabase("testdb");
+        var password = builder.AddParameter($"{ServerName}-password", value: Password, secret: true);
+        var server = builder.AddOpenGauss(ServerName).WithPassword(password);
+
+        if (!string.IsNullOrWhiteSpace(UserName))
+        {
+            var userName = builder.AddParameter($"{ServerName}-username", value: UserName!, secret: false);
+            server = server.WithUserName(userName);
+        }
+
+        server = ConfigureServer(server, builder);
+
+        var database = AddDatabase(server, builder);
+
+        _openGaussServer = server;
+        _openGaussDatabase = database;
         _app = builder.Build();
         await _app.StartAsync();
         // Wait for the database resource to become healthy instead of sleeping.
@@ -261,8 +346,50 @@ public class OpenGaussFixture : IAsyncLifetime
         }
 
         // Add connection pooling parameter to match testcontainers implementation
-        return connectionString + ";No Reset On Close=true;";
+        return connectionString;
     }
 
     // Docker detection is centralized in DockerTestEnvironment.
+}
+
+public sealed class OpenGaussDefaultFixture : OpenGaussFixtureBase
+{
+}
+
+public sealed class OpenGaussDifferentPasswordFixture : OpenGaussFixtureBase
+{
+    protected override string Password => "Test@456";
+}
+
+public sealed class OpenGaussWithPgAdminFixture : OpenGaussFixtureBase
+{
+    protected override IResourceBuilder<OpenGaussServerResource> ConfigureServer(
+        IResourceBuilder<OpenGaussServerResource> server,
+        IDistributedApplicationTestingBuilder builder)
+    {
+        return server.WithPgAdmin();
+    }
+}
+
+public sealed class OpenGaussWithPgWebFixture : OpenGaussFixtureBase
+{
+    protected override IResourceBuilder<OpenGaussServerResource> ConfigureServer(
+        IResourceBuilder<OpenGaussServerResource> server,
+        IDistributedApplicationTestingBuilder builder)
+    {
+        return server.WithPgWeb();
+    }
+}
+
+public sealed class OpenGaussAddDatabaseNameOnlyFixture : OpenGaussFixtureBase
+{
+    protected override string DatabaseResourceName => "testdb";
+
+    protected override IResourceBuilder<OpenGaussDatabaseResource> AddDatabase(
+        IResourceBuilder<OpenGaussServerResource> server,
+        IDistributedApplicationTestingBuilder builder)
+    {
+        var database = server.AddDatabase(DatabaseResourceName);
+        return ConfigureDatabase(database, builder);
+    }
 }
