@@ -56,7 +56,7 @@ public class OpenGaussServerResource : ContainerResource, IResourceWithConnectio
     /// </summary>
     public ReferenceExpression ConnectionStringExpression =>
         ReferenceExpression.Create(
-            $"Host={PrimaryEndpoint.Property(EndpointProperty.Host)};Port={PrimaryEndpoint.Property(EndpointProperty.Port)};Username={UserNameReference};Password={PasswordParameter}");
+            $"Host={PrimaryEndpoint.Property(EndpointProperty.Host)};Port={PrimaryEndpoint.Property(EndpointProperty.Port)};Username={UserNameReference};Password={PasswordParameter};No Reset On Close=true;");
 
     /// <summary>
     /// Gets the connection string for the OpenGauss server.
